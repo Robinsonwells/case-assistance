@@ -1,0 +1,44 @@
+{
+  "name": "legal-ai-compliance",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AI-powered legal compliance tool for analyzing case documents with privacy-first architecture",
+  "main": "index.html",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@xenova/transformers": "^2.13.5",
+    "idb": "^8.0.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "tailwindcss": "^3.4.0",
+    "postcss": "^8.4.0",
+    "autoprefixer": "^10.4.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "keywords": [
+    "legal",
+    "compliance",
+    "ai",
+    "document-analysis",
+    "privacy-first",
+    "rag",
+    "embeddings"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/legal-ai-compliance.git"
+  }
+}
