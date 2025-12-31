@@ -72,3 +72,4 @@ coverage/
 
 # Mac OS
 Thumbs.db
+.env
