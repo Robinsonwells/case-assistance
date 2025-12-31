@@ -1,0 +1,74 @@
+# Dependencies
+# Node modules directory - install via npm/yarn
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build artifacts
+# Vite build output directory
+dist/
+build/
+.cache/
+
+# Environment variables
+# Local environment files should never be committed
+.env.local
+.env.*.local
+
+# OS-specific files
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*~
+
+# IDE and editor configurations
+# VS Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (WebStorm, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Logs
+# npm logs
+npm-debug.log*
+npm-error.log*
+
+# yarn logs
+yarn-debug.log*
+yarn-error.log*
+
+# pnpm logs
+pnpm-debug.log*
+
+# System logs
+*.log
+logs/
+
+# Testing
+coverage/
+.nyc_output/
+
+# Development
+.DS_Store
+.env.development.local
+.env.test.local
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Mac OS
+Thumbs.db
