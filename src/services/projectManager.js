@@ -304,7 +304,7 @@ export default class ProjectManager {
         .join('\n\n')
 
       // Query Perplexity with context
-      const systemPrompt = `You are a legal analysis AI assistant. 
+      const systemPrompt = `You are a legal analysis AI assistant.
 You have been given relevant excerpts from legal documents.
 Answer the user's question based on the provided context.
 If the information is not in the context, say "I don't have information about that in the provided documents."`
@@ -318,11 +318,18 @@ If the information is not in the context, say "I don't have information about th
       // Update metadata with last query time
       await this._updateLastQueriedTime()
 
+      // Format chunks for UI display
+      const formattedChunks = relevantChunks.map(chunk => ({
+        content: chunk.text,
+        fileName: chunk.metadata?.sourceFile || 'Unknown file',
+        similarity: chunk.score / 10 // Normalize score to 0-1 range for display
+      }))
+
       return {
         question: question.trim(),
         answer,
-        sourcesUsed: relevantChunks.length,
-        relevantChunks
+        sourcesUsed: formattedChunks.length,
+        relevantChunks: formattedChunks
       }
     } catch (err) {
       console.error('Error querying project:', err)

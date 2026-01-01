@@ -63,6 +63,7 @@ export default class PerplexityAPI {
       console.log('Querying Perplexity API via Vercel serverless function...')
       console.log(`Context length: ${context.length} characters`)
       console.log(`Question: ${question.substring(0, 100)}...`)
+      console.log('Context preview:', context.substring(0, 500) + '...')
 
       const requestPayload = {
         systemPrompt,
