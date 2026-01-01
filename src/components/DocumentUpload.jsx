@@ -33,15 +33,13 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       setUploading(true)
       setProgress(0)
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setProgress(prev => (prev < 90 ? prev + Math.random() * 20 : prev))
-      }, 200)
+      // Upload document with progress tracking
+      const result = await projectManager.uploadDocumentToProject(file, {
+        onProgress: (current, total, percentage) => {
+          setProgress(percentage)
+        }
+      })
 
-      // Upload document
-      const result = await projectManager.uploadDocumentToProject(file)
-
-      clearInterval(progressInterval)
       setProgress(100)
 
       // Add to uploaded files list
@@ -167,7 +165,9 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       {uploading && progress > 0 && (
         <div className="space-y-2">
           <div className="flex justify-between items-center">
-            <p className="text-sm text-slate-400">Uploading and processing...</p>
+            <p className="text-sm text-slate-400">
+              {progress < 100 ? 'Generating embeddings...' : 'Complete!'}
+            </p>
             <p className="text-sm font-semibold text-blue-400">{Math.round(progress)}%</p>
           </div>
           <div className="w-full bg-slate-600 rounded-full h-2 overflow-hidden">
@@ -176,6 +176,11 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
               style={{ width: `${progress}%` }}
             />
           </div>
+          {progress > 0 && progress < 100 && (
+            <p className="text-xs text-slate-500">
+              Processing in memory-efficient batches (50 chunks at a time)
+            </p>
+          )}
         </div>
       )}
 

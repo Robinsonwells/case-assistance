@@ -102,13 +102,16 @@ export default class EmbeddingGenerator {
   }
 
   /**
-   * Generate embeddings for multiple texts
-   * Processes in parallel batches (up to 4 at a time) for efficiency
-   * 
+   * Generate embeddings for multiple texts with memory-efficient batch processing
+   * Processes in parallel batches (50 at a time by default) to prevent memory crashes
+   *
    * @param {array} textArray - Array of text strings to embed
+   * @param {object} options - Configuration options
+   * @param {number} options.batchSize - Chunks to process per batch (default: 50)
+   * @param {function} options.onProgress - Progress callback function(current, total, percentage)
    * @returns {Promise<array>} - Array of embedding vectors
    */
-  async generateEmbeddings(textArray) {
+  async generateEmbeddings(textArray, options = {}) {
     try {
       // Validate input
       if (!Array.isArray(textArray)) {
@@ -125,17 +128,21 @@ export default class EmbeddingGenerator {
         throw new Error('All entries in array must be strings')
       }
 
-      console.log(`Generating ${textArray.length} embeddings...`)
+      // Extract options with defaults
+      const batchSize = options.batchSize || 50
+      const onProgress = options.onProgress || (() => {})
+
+      console.log(`Generating ${textArray.length} embeddings in batches of ${batchSize}...`)
 
       // Initialize model once for all embeddings
       await this.initialize()
 
-      // Process in parallel batches (up to 4 at a time)
-      const batchSize = 4
       const embeddings = []
+      const totalBatches = Math.ceil(textArray.length / batchSize)
 
       for (let i = 0; i < textArray.length; i += batchSize) {
         const batch = textArray.slice(i, i + batchSize)
+        const currentBatch = Math.floor(i / batchSize) + 1
 
         // Process batch in parallel
         const batchResults = await Promise.all(
@@ -144,9 +151,21 @@ export default class EmbeddingGenerator {
 
         embeddings.push(...batchResults)
 
-        // Log progress
+        // Calculate progress
         const processed = Math.min(i + batchSize, textArray.length)
-        console.log(`Progress: ${processed}/${textArray.length} embeddings generated`)
+        const percentage = Math.round((processed / textArray.length) * 100)
+
+        // Log progress
+        console.log(`Batch ${currentBatch}/${totalBatches}: ${processed}/${textArray.length} embeddings (${percentage}%)`)
+
+        // Call progress callback
+        onProgress(processed, textArray.length, percentage)
+
+        // Add small delay between batches to allow garbage collection
+        // This prevents memory buildup on large documents
+        if (i + batchSize < textArray.length) {
+          await new Promise(resolve => setTimeout(resolve, 100))
+        }
       }
 
       console.log(`Successfully generated ${embeddings.length} embeddings`)

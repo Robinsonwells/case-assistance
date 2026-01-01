@@ -142,11 +142,13 @@ export default class ProjectManager {
   }
 
   /**
-   * Upload and process a document in current project
+   * Upload and process a document in current project with progress tracking
    * @param {File} file - Document file to upload
+   * @param {object} options - Configuration options
+   * @param {function} options.onProgress - Progress callback function(current, total, percentage)
    * @returns {Promise<object>} - {fileName, chunkCount}
    */
-  async uploadDocumentToProject(file) {
+  async uploadDocumentToProject(file, options = {}) {
     try {
       if (!this.currentProjectDir) {
         throw new Error('No project selected. Please switch to a project first.')
@@ -162,14 +164,21 @@ export default class ProjectManager {
       // Chunk the document
       const chunks = this.chunker.chunkHybrid(fileText)
 
-      // Generate embeddings for each chunk
-      console.log(`Generating embeddings for ${chunks.length} chunks...`)
-      const chunksWithEmbeddings = await Promise.all(
-        chunks.map(async (chunk) => ({
-          ...chunk,
-          embedding: await this.embeddingGenerator.generateEmbedding(chunk.text)
-        }))
-      )
+      // Extract text from chunks for batch embedding
+      const chunkTexts = chunks.map(chunk => chunk.text)
+
+      // Generate embeddings using memory-efficient batch processing
+      console.log(`Generating embeddings for ${chunks.length} chunks with batch processing...`)
+      const embeddings = await this.embeddingGenerator.generateEmbeddings(chunkTexts, {
+        batchSize: 50,
+        onProgress: options.onProgress
+      })
+
+      // Combine chunks with their embeddings
+      const chunksWithEmbeddings = chunks.map((chunk, index) => ({
+        ...chunk,
+        embedding: embeddings[index]
+      }))
 
       // Create filename with timestamp
       const timestamp = Date.now()
