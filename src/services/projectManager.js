@@ -2,6 +2,7 @@ import DocumentChunker from './documentChunker'
 import EmbeddingGenerator from './embeddingGenerator'
 import RAGRetriever from './ragRetriever'
 import PerplexityAPI from './perplexityAPI'
+import PDFExtractor from './pdfExtractor'
 
 /**
  * ProjectManager - Core orchestrator for all project operations
@@ -21,6 +22,7 @@ export default class ProjectManager {
     this.embeddingGenerator = new EmbeddingGenerator()
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
+    this.pdfExtractor = new PDFExtractor()
   }
 
   /**
@@ -162,8 +164,14 @@ export default class ProjectManager {
         throw new Error('No file provided')
       }
 
-      // Read file text
-      const fileText = await file.text()
+      // Extract text based on file type
+      let fileText
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        console.log('Extracting text from PDF...')
+        fileText = await this.pdfExtractor.extractText(file)
+      } else {
+        fileText = await file.text()
+      }
 
       // Chunk the document
       const chunks = this.chunker.chunkHybrid(fileText)
