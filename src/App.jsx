@@ -59,16 +59,11 @@ export default function App() {
     try {
       const projectList = await manager.listProjects()
       setProjects(projectList)
-      
-      // Auto-select first project if available
-      if (projectList.length > 0 && !selectedProject) {
-        setSelectedProject(projectList[0].name)
-      }
     } catch (err) {
       console.error('Failed to load projects:', err)
       setError('Failed to load projects. Please try again.')
     }
-  }, [selectedProject])
+  }, [])
 
   // Load storage handle from IndexedDB
   const loadStorageHandle = async () => {
@@ -317,15 +312,7 @@ export default function App() {
           ) : (
             <div className="flex items-center justify-center h-full">
               <div className="text-center">
-                <p className="text-slate-400 text-lg mb-4">Select a project or create a new one</p>
-                {projects.length === 0 && (
-                  <button
-                    onClick={() => setShowCreator(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
-                  >
-                    Create First Project
-                  </button>
-                )}
+                <p className="text-slate-300 text-xl">Please select or create a project</p>
               </div>
             </div>
           )}
