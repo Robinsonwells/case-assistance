@@ -57,7 +57,11 @@ export default class ProjectManager {
 
       await this._writeFile(projectDir, 'metadata.json', JSON.stringify(metadata, null, 2))
 
-      console.log(`Project "${projectName}" created successfully`)
+      // Automatically select the newly created project
+      this.currentProjectDir = projectDir
+      this.currentProjectName = sanitizedName
+
+      console.log(`Project "${projectName}" created and selected successfully`)
       return `Project "${projectName}" created successfully`
     } catch (err) {
       console.error('Error creating project:', err)
