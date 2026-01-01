@@ -43,7 +43,16 @@ export default function ProjectEditor({ projectName, projectManager }) {
       })
     } catch (err) {
       console.error('Failed to load project metadata:', err)
-      setError('Failed to load project information')
+      // Set default metadata even if loading fails (e.g., for new empty projects)
+      setDocumentCount(0)
+      setChunkCount(0)
+      setProjectMetadata({
+        name: projectName,
+        fileCount: 0,
+        chunkCount: 0,
+        createdAt: new Date().toLocaleDateString(),
+        lastQueried: null
+      })
     } finally {
       setIsRefreshing(false)
     }
