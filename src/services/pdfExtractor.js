@@ -1,6 +1,6 @@
 import * as pdfjsLib from 'pdfjs-dist'
 
-const WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
+const WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.530/pdf.worker.min.mjs'
 pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL
 
 /**
