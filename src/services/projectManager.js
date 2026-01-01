@@ -295,7 +295,7 @@ export default class ProjectManager {
       const relevantChunks = await this.ragRetriever.findRelevantChunks(
         question,
         chunks,
-        5 // top K
+        10 // top K
       )
 
       // Build context from relevant chunks
