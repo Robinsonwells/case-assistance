@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import DocumentUpload from './DocumentUpload'
-import QueryInterface from './QueryInterface'
+import KnowledgeBasePanel from './KnowledgeBasePanel'
+import ChatPanel from './ChatPanel'
 
 export default function ProjectEditor({ projectName, projectManager }) {
   const [projectMetadata, setProjectMetadata] = useState(null)
@@ -8,6 +8,7 @@ export default function ProjectEditor({ projectName, projectManager }) {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [chunkCount, setChunkCount] = useState(0)
+  const [activeTab, setActiveTab] = useState('knowledge')
 
   // Load project metadata on mount
   useEffect(() => {
@@ -146,22 +147,45 @@ export default function ProjectEditor({ projectName, projectManager }) {
         </div>
       )}
 
-      {/* Main content - two sections */}
-      <div className="grid grid-cols-2 gap-6 flex-1 overflow-hidden">
-        {/* Document Upload section */}
-        <div className="bg-slate-700/30 rounded-lg p-6 border border-slate-600 overflow-y-auto">
-          <DocumentUpload
-            projectManager={projectManager}
-            onUploadComplete={handleUploadComplete}
-          />
+      {/* Tab Navigation and Content */}
+      <div className="flex flex-col flex-1 overflow-hidden gap-6">
+        <div className="flex gap-2 border-b border-slate-700">
+          <button
+            onClick={() => setActiveTab('knowledge')}
+            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
+              activeTab === 'knowledge'
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            Knowledge Base
+          </button>
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`px-6 py-3 font-semibold transition-colors border-b-2 ${
+              activeTab === 'chat'
+                ? 'border-blue-500 text-white'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            Chat
+          </button>
         </div>
 
-        {/* Query Interface section */}
-        <div className="bg-slate-700/30 rounded-lg p-6 border border-slate-600 overflow-y-auto">
-          <QueryInterface
-            projectManager={projectManager}
-            projectName={projectName}
-          />
+        <div className="flex-1 overflow-hidden">
+          {activeTab === 'knowledge' ? (
+            <KnowledgeBasePanel
+              projectManager={projectManager}
+              projectName={projectName}
+              onFilesChanged={loadProjectMetadata}
+            />
+          ) : (
+            <ChatPanel
+              projectManager={projectManager}
+              projectName={projectName}
+              documentCount={documentCount}
+            />
+          )}
         </div>
       </div>
 

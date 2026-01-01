@@ -331,6 +331,49 @@ If the information is not in the context, say "I don't have information about th
   }
 
   /**
+   * Delete a file from the current project
+   * @param {string} fileName - Internal file name to delete
+   * @returns {Promise<object>} - {deleted: number, remaining: number}
+   */
+  async deleteFileFromProject(fileName) {
+    try {
+      if (!this.currentProjectDir) {
+        throw new Error('No project selected')
+      }
+
+      if (!fileName) {
+        throw new Error('File name is required')
+      }
+
+      const fileHandle = await this.currentProjectDir.getFileHandle(fileName)
+      await this.currentProjectDir.removeEntry(fileName)
+
+      const metadataText = await this._readFile(this.currentProjectDir, 'metadata.json')
+      const metadata = JSON.parse(metadataText)
+
+      metadata.files = metadata.files.filter(f => f.fileName !== fileName)
+
+      const remainingChunks = await this.getProjectChunks()
+      metadata.totalChunks = remainingChunks.length
+
+      await this._writeFile(
+        this.currentProjectDir,
+        'metadata.json',
+        JSON.stringify(metadata, null, 2)
+      )
+
+      console.log(`File "${fileName}" deleted successfully`)
+      return {
+        deleted: 1,
+        remaining: remainingChunks.length
+      }
+    } catch (err) {
+      console.error('Error deleting file:', err)
+      throw new Error(`Failed to delete file: ${err.message}`)
+    }
+  }
+
+  /**
    * Update project metadata with new file entry
    * @private
    */
