@@ -42,6 +42,51 @@ function MessageContent({ content }) {
   )
 }
 
+function SourcesExpander({ sources }) {
+  const [showSources, setShowSources] = useState(false)
+
+  if (!sources || sources.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="mt-1">
+      <button
+        onClick={() => setShowSources(!showSources)}
+        className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-300 transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${showSources ? 'rotate-90' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+        <span>{sources.length} sources</span>
+      </button>
+      {showSources && (
+        <div className="mt-2 space-y-2 max-h-96 overflow-y-auto">
+          {sources.map((chunk, index) => (
+            <div key={index} className="p-3 bg-slate-800/50 rounded text-xs">
+              <div className="flex items-center gap-2 mb-2 text-slate-400">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="font-medium">{chunk.fileName}</span>
+                <span className="text-slate-500">• Similarity: {(chunk.similarity * 100).toFixed(1)}%</span>
+              </div>
+              <p className="text-slate-300 whitespace-pre-wrap break-words leading-relaxed">
+                {chunk.content}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ChatPanel({ projectManager, projectName, documentCount }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -96,6 +141,7 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
         role: 'assistant',
         content: result.answer,
         sourcesCount: result.relevantChunks?.length || 0,
+        sources: result.relevantChunks || [],
         timestamp: new Date().toLocaleTimeString()
       }
 
@@ -162,10 +208,10 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
                   )}
                   <div className="flex items-center gap-2 mt-2 text-xs opacity-70">
                     <span>{msg.timestamp}</span>
-                    {msg.role === 'assistant' && msg.sourcesCount > 0 && (
-                      <span>• {msg.sourcesCount} sources</span>
-                    )}
                   </div>
+                  {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
+                    <SourcesExpander sources={msg.sources} />
+                  )}
                 </div>
               </div>
             ))}
