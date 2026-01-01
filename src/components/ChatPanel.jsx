@@ -8,6 +8,25 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
   const messagesEndRef = useRef(null)
 
   useEffect(() => {
+    const savedMessages = localStorage.getItem(`chat_history_${projectName}`)
+    if (savedMessages) {
+      try {
+        setMessages(JSON.parse(savedMessages))
+      } catch (err) {
+        console.error('Failed to load chat history:', err)
+      }
+    } else {
+      setMessages([])
+    }
+  }, [projectName])
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(`chat_history_${projectName}`, JSON.stringify(messages))
+    }
+  }, [messages, projectName])
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
@@ -51,25 +70,22 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
     if (window.confirm('Clear all messages?')) {
       setMessages([])
       setError('')
+      localStorage.removeItem(`chat_history_${projectName}`)
     }
   }
 
   return (
     <div className="flex flex-col h-full bg-slate-800/30 rounded-lg overflow-hidden">
-      <div className="flex-shrink-0 border-b border-slate-700 p-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold text-white">{projectName}</h3>
-          <p className="text-sm text-slate-400">{documentCount} documents available</p>
-        </div>
-        {messages.length > 0 && (
+      {messages.length > 0 && (
+        <div className="flex-shrink-0 border-b border-slate-700 p-4 flex items-center justify-end">
           <button
             onClick={clearChat}
             className="text-sm text-slate-400 hover:text-slate-300 transition-colors"
           >
             Clear Chat
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4">
         {messages.length === 0 ? (

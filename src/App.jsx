@@ -126,9 +126,9 @@ export default function App() {
       setError(null)
 
       await projectManager.createProject(projectName)
-      await loadProjects(projectManager)
       setShowCreator(false)
       setSelectedProject(projectName)
+      await loadProjects(projectManager)
     } catch (err) {
       console.error('Failed to create project:', err)
       setError(`Failed to create project: ${err.message}`)
@@ -153,6 +153,31 @@ export default function App() {
     } catch (err) {
       console.error('Failed to select project:', err)
       setError(`Failed to select project: ${err.message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Delete a project
+  const handleDeleteProject = async (projectName) => {
+    if (!window.confirm(`Are you sure you want to delete "${projectName}"? This action cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setLoading(true)
+      setError(null)
+
+      await projectManager.deleteProject(projectName)
+
+      if (selectedProject === projectName) {
+        setSelectedProject(null)
+      }
+
+      await loadProjects(projectManager)
+    } catch (err) {
+      console.error('Failed to delete project:', err)
+      setError(`Failed to delete project: ${err.message}`)
     } finally {
       setLoading(false)
     }
@@ -244,33 +269,36 @@ export default function App() {
       )}
 
       {/* Main content */}
-      <main className="flex flex-1 overflow-hidden max-w-7xl mx-auto w-full">
+      <main className="flex flex-1 overflow-hidden w-full">
         {/* Sidebar - Project List */}
-        <aside className="w-1/4 bg-slate-800 border-r border-slate-700 overflow-y-auto p-4">
-          <div className="mb-6">
-            <h2 className="text-lg font-semibold text-white mb-4">Projects</h2>
-            {projects.length === 0 ? (
-              <p className="text-slate-400 text-sm mb-6">No projects yet. Create one to get started.</p>
-            ) : (
-              <ProjectList
-                projects={projects}
-                selectedProject={selectedProject}
-                onSelectProject={handleSelectProject}
-              />
-            )}
-          </div>
+        <aside className="w-64 bg-slate-800 border-r border-slate-700 overflow-y-auto">
+          <div className="p-4">
+            <div className="mb-6">
+              <h2 className="text-lg font-semibold text-white mb-4">Projects</h2>
+              {projects.length === 0 ? (
+                <p className="text-slate-400 text-sm mb-6">No projects yet. Create one to get started.</p>
+              ) : (
+                <ProjectList
+                  projects={projects}
+                  selectedProject={selectedProject}
+                  onSelectProject={handleSelectProject}
+                  onDeleteProject={handleDeleteProject}
+                />
+              )}
+            </div>
 
-          <button
-            onClick={() => setShowCreator(true)}
-            className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm"
-            disabled={loading}
-          >
-            + New Project
-          </button>
+            <button
+              onClick={() => setShowCreator(true)}
+              className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm"
+              disabled={loading}
+            >
+              + New Project
+            </button>
+          </div>
         </aside>
 
         {/* Main content area */}
-        <section className="flex-1 overflow-y-auto p-6">
+        <section className="flex-1 overflow-y-auto p-6 max-w-7xl mx-auto w-full">
           {showCreator ? (
             <div className="max-w-2xl">
               <ProjectCreator

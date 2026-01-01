@@ -118,14 +118,21 @@ export default function KnowledgeBasePanel({ projectManager, projectName, onFile
         )}
 
         <div className="flex-1 overflow-y-auto border border-slate-600 rounded-lg bg-slate-700/30">
-          {files.length === 0 ? (
+          {loading && files.length === 0 ? (
+            <div className="flex items-center justify-center h-full p-8">
+              <div className="text-center">
+                <span className="inline-block w-8 h-8 border-4 border-slate-600 border-t-blue-500 rounded-full animate-spin mb-4"></span>
+                <p className="text-slate-400">Loading documents...</p>
+              </div>
+            </div>
+          ) : files.length === 0 ? (
             <div className="flex items-center justify-center h-full p-8">
               <div className="text-center max-w-md">
                 <svg className="w-16 h-16 text-slate-600 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 <p className="text-slate-400">
-                  No files uploaded yet. Upload documents to get started.
+                  No documents uploaded yet. Upload documents above to get started.
                 </p>
               </div>
             </div>
