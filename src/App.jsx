@@ -3,6 +3,7 @@ import ProjectManager from './services/projectManager'
 import ProjectList from './components/ProjectList'
 import ProjectCreator from './components/ProjectCreator'
 import ProjectEditor from './components/ProjectEditor'
+import { saveDirectoryHandle, loadDirectoryHandle } from './services/directoryHandleStorage'
 
 export default function App() {
   // State management
@@ -69,12 +70,11 @@ export default function App() {
     }
   }, [selectedProject])
 
-  // Load storage handle from localStorage
+  // Load storage handle from IndexedDB
   const loadStorageHandle = async () => {
     try {
-      // For now, we'll return null as we need a fresh picker on first use
-      // In production, you could use IndexedDB to persist handles
-      return null
+      const handle = await loadDirectoryHandle()
+      return handle
     } catch (err) {
       console.error('Error loading storage handle:', err)
       return null
@@ -93,6 +93,9 @@ export default function App() {
         mode: 'readwrite',
         startIn: 'documents',
       })
+
+      // Save the directory handle to IndexedDB
+      await saveDirectoryHandle(dirHandle)
 
       // Initialize ProjectManager with the selected directory
       const manager = new ProjectManager(dirHandle)
@@ -203,7 +206,7 @@ export default function App() {
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-4">
         <div className="w-full max-w-md">
           <div className="bg-slate-800 rounded-lg p-8 shadow-2xl border border-slate-700">
-            <h1 className="text-3xl font-bold text-white mb-2">Legal Compliance AI</h1>
+            <h1 className="text-3xl font-bold text-white mb-2">AI case assistance</h1>
             <p className="text-slate-400 mb-8">Privacy-first document analysis for attorneys</p>
 
             <div className="bg-slate-700/50 rounded-lg p-6 mb-8 border border-slate-600">
@@ -248,7 +251,7 @@ export default function App() {
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-700 px-6 py-4 shadow-lg">
         <div className="max-w-7xl mx-auto">
-          <h1 className="text-2xl font-bold text-white">Legal Compliance AI</h1>
+          <h1 className="text-2xl font-bold text-white">AI case assistance</h1>
           <p className="text-slate-400 text-sm">Privacy-first document analysis and compliance</p>
         </div>
       </header>
