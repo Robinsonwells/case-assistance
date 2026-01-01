@@ -157,21 +157,17 @@ Transformers.js (for embeddings)
 
 Development tools
 
-Step 3: Create Environment File
-Create a .env.local file in the project root:
+Step 3: Configure Supabase Edge Function
+The application uses a Supabase Edge Function to proxy all Perplexity API calls, ensuring your API key is NEVER exposed to the browser.
 
-bash
-# .env.local
-REACT_APP_PERPLEXITY_API_KEY=pplx_your_api_key_here
-Get your API key:
+1. Visit your [Supabase Dashboard](https://supabase.com/dashboard/project/hlfeookqxwvrygiyvsxj)
+2. Navigate to **Settings** → **Edge Functions** → **Secrets**
+3. Add a new secret:
+   - Name: `PERPLEXITY_API_KEY`
+   - Value: Your Perplexity API key (get one from [Perplexity API Dashboard](https://www.perplexity.ai/settings/api))
+4. Click **Save**
 
-Visit Perplexity API Dashboard
-
-Sign up or log in
-
-Create API key
-
-Copy the key and paste into .env.local
+The edge function is already deployed and will automatically use this secret.
 
 Step 4: Verify Installation
 bash
@@ -207,19 +203,20 @@ console.log('Component state:', state)
 
 // Check API calls
 // Open Network tab in DevTools
-// Look for POST requests to api.perplexity.com
+// Look for POST requests to your Supabase edge function
 
 // Check localStorage
 console.log(localStorage.getItem('key'))
 
 // Check embeddings
 // Open IndexedDB in DevTools > Application > IndexedDB
-Environment Variables in Development
-Variables in .env.local are automatically loaded and prefixed with REACT_APP_:
 
-javascript
-// In code:
-const apiKey = process.env.REACT_APP_PERPLEXITY_API_KEY
+Environment Variables in Development
+The application uses Vite environment variables (prefixed with VITE_):
+- `VITE_SUPABASE_URL` - Your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
+
+IMPORTANT: The Perplexity API key is NEVER exposed to the browser. It exists only as a server-side secret in Supabase.
 Build & Deployment
 Production Build
 bash
@@ -255,20 +252,13 @@ Select your repository
 
 Click "Import"
 
-Step 3: Configure Environment Variables
-In Vercel dashboard, go to Settings
+Step 3: Configure Environment Variables (Optional)
+If you need custom Supabase configuration, add these in Vercel:
 
-Click "Environment Variables"
+- `VITE_SUPABASE_URL` - Your Supabase project URL
+- `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
 
-Add new variable:
-
-Name: REACT_APP_PERPLEXITY_API_KEY
-
-Value: pplx_your_api_key_here
-
-Environments: Production, Preview, Development
-
-Click "Save"
+IMPORTANT: The Perplexity API key should ONLY be configured in Supabase (not Vercel). See Step 3 in the installation section above.
 
 Step 4: Deploy
 Vercel auto-deploys on git push

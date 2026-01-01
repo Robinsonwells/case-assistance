@@ -1,3 +1,5 @@
+import { callPerplexity } from '../lib/apiClient'
+
 /**
  * PerplexityAPI - Integration with Perplexity API for LLM-powered answers
  *
@@ -12,6 +14,7 @@
  * - Only chunk context is sent (never full documents)
  * - API key is stored securely server-side (not exposed in client bundle)
  * - All requests go through Supabase Edge Function proxy
+ * - NO API keys are ever exposed to the browser
  *
  * Model Choice: sonar-reasoning-pro
  * - Advanced reasoning for complex legal analysis
@@ -24,22 +27,9 @@
  */
 export default class PerplexityAPI {
   constructor() {
-    // Supabase edge function endpoint
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      console.error('Supabase configuration missing')
-      throw new Error('Supabase configuration not found')
-    }
-
-    this.edgeFunctionURL = `${supabaseUrl}/functions/v1/perplexity-proxy`
-    this.supabaseAnonKey = supabaseAnonKey
-
-    // Request configuration
     this.model = 'sonar-reasoning-pro'
-    this.temperature = 0.3 // Low temperature for factual responses
-    this.timeout = 30000 // 30 second timeout
+    this.temperature = 0.3
+    this.timeout = 30000
   }
 
   /**
@@ -58,7 +48,6 @@ export default class PerplexityAPI {
    */
   async query({ systemPrompt, context, question }) {
     try {
-      // Validate inputs
       if (!systemPrompt || typeof systemPrompt !== 'string') {
         throw new Error('systemPrompt must be a non-empty string')
       }
@@ -75,7 +64,6 @@ export default class PerplexityAPI {
       console.log(`Context length: ${context.length} characters`)
       console.log(`Question: ${question.substring(0, 100)}...`)
 
-      // Build the request payload
       const requestPayload = {
         systemPrompt,
         context,
@@ -84,34 +72,12 @@ export default class PerplexityAPI {
         temperature: this.temperature
       }
 
-      // Make the API request with timeout
-      const response = await this._fetchWithTimeout(
-        this.edgeFunctionURL,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.supabaseAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestPayload)
-        },
-        this.timeout
-      )
+      const data = await callPerplexity(requestPayload)
 
-      // Handle API errors
-      if (!response.ok) {
-        await this._handleAPIError(response)
-      }
-
-      // Parse response
-      const data = await response.json()
-
-      // Validate response structure
       if (!data.choices || !data.choices[0] || !data.choices[0].message) {
         throw new Error('Invalid response structure from Perplexity API')
       }
 
-      // Extract answer
       const answer = data.choices[0].message.content
 
       console.log('Successfully received answer from Perplexity API')
@@ -137,34 +103,13 @@ export default class PerplexityAPI {
 
       console.log('Querying Perplexity API (simple) via edge function...')
 
-      // Build simple request (no context)
       const requestPayload = {
         prompt,
         model: this.model,
         temperature: this.temperature
       }
 
-      // Make the API request
-      const response = await this._fetchWithTimeout(
-        this.edgeFunctionURL,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.supabaseAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(requestPayload)
-        },
-        this.timeout
-      )
-
-      // Handle errors
-      if (!response.ok) {
-        await this._handleAPIError(response)
-      }
-
-      // Parse response
-      const data = await response.json()
+      const data = await callPerplexity(requestPayload)
 
       if (!data.choices || !data.choices[0] || !data.choices[0].message) {
         throw new Error('Invalid response structure from Perplexity API')
@@ -178,133 +123,13 @@ export default class PerplexityAPI {
     }
   }
 
-  /**
-   * Fetch with timeout
-   * Handles network requests with a timeout to prevent hanging
-   * 
-   * @private
-   * @param {string} url - Request URL
-   * @param {object} options - Fetch options
-   * @param {number} timeout - Timeout in milliseconds
-   * @returns {Promise<Response>} - Fetch response
-   */
-  async _fetchWithTimeout(url, options, timeout) {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), timeout)
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal
-      })
-      clearTimeout(timeoutId)
-      return response
-    } catch (err) {
-      clearTimeout(timeoutId)
-      if (err.name === 'AbortError') {
-        throw new Error(`Request timeout after ${timeout}ms`)
-      }
-      throw err
-    }
-  }
-
-  /**
-   * Handle API error responses
-   * Provides specific error messages for different HTTP status codes
-   *
-   * @private
-   * @param {Response} response - Fetch response object
-   */
-  async _handleAPIError(response) {
-    let errorMessage = `HTTP ${response.status}`
-
-    switch (response.status) {
-      case 400:
-        errorMessage = 'Bad request - invalid parameters'
-        break
-
-      case 401:
-        errorMessage = 'Unauthorized - API key invalid or expired. Check PERPLEXITY_API_KEY configuration.'
-        break
-
-      case 403:
-        errorMessage = 'Forbidden - access denied to this model'
-        break
-
-      case 429:
-        errorMessage = 'Rate limited - too many requests. Please wait and try again.'
-        break
-
-      case 500:
-        errorMessage = 'Server error - Perplexity API is experiencing issues'
-        break
-
-      case 503:
-        errorMessage = 'Service unavailable - Perplexity API is temporarily down'
-        break
-
-      default:
-        // Try to extract error message from response
-        try {
-          const errorData = await response.json()
-          if (errorData.error) {
-            errorMessage = typeof errorData.error === 'string' ? errorData.error : errorData.error.message || errorMessage
-          }
-        } catch (e) {
-          // Fallback to status text
-          errorMessage = response.statusText || `HTTP ${response.status}`
-        }
-    }
-
-    throw new Error(errorMessage)
-  }
-
-  /**
-   * Check API connectivity and authentication
-   * Useful for diagnostics and status checks
-   *
-   * @returns {Promise<boolean>} - True if API is accessible
-   */
-  async checkConnectivity() {
-    try {
-      // Try a simple request
-      const response = await this._fetchWithTimeout(
-        this.edgeFunctionURL,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${this.supabaseAnonKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            prompt: 'test',
-            model: this.model,
-            temperature: 0.1
-          })
-        },
-        5000 // 5 second timeout for connectivity check
-      )
-
-      return response.ok || response.status === 429 // OK or rate limited (not auth error)
-    } catch (err) {
-      console.error('Connectivity check failed:', err)
-      return false
-    }
-  }
-
-  /**
-   * Get API configuration info
-   * Useful for debugging
-   *
-   * @returns {object} - Configuration details
-   */
   getConfig() {
     return {
       model: this.model,
-      edgeFunctionURL: this.edgeFunctionURL,
       temperature: this.temperature,
       timeout: this.timeout,
-      supabaseConfigured: !!this.supabaseAnonKey
+      proxyUsed: 'Supabase Edge Function (perplexity-proxy)',
+      apiKeyExposure: 'NEVER - API key only exists server-side'
     }
   }
 }
