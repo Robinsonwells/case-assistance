@@ -37,7 +37,8 @@ export default function KnowledgeBasePanel({ projectManager, projectName, onFile
       setFiles(Array.from(fileMap.values()))
     } catch (err) {
       console.error('Failed to load files:', err)
-      setError('Failed to load files')
+      // Set empty files array for new/empty projects instead of showing error
+      setFiles([])
     } finally {
       setLoading(false)
     }
