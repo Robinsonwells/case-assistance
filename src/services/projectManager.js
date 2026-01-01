@@ -338,6 +338,34 @@ If the information is not in the context, say "I don't have information about th
   }
 
   /**
+   * Delete an entire project
+   * @param {string} projectName - Name of the project to delete
+   * @returns {Promise<string>} - Success message
+   */
+  async deleteProject(projectName) {
+    try {
+      if (!projectName || projectName.trim().length === 0) {
+        throw new Error('Project name cannot be empty')
+      }
+
+      const projectDir = await this.rootDirHandle.getDirectoryHandle(projectName)
+
+      await this._deleteDirectoryRecursive(projectDir, projectName)
+
+      if (this.currentProjectName === projectName) {
+        this.currentProjectDir = null
+        this.currentProjectName = null
+      }
+
+      console.log(`Project "${projectName}" deleted successfully`)
+      return `Project "${projectName}" deleted successfully`
+    } catch (err) {
+      console.error('Error deleting project:', err)
+      throw new Error(`Failed to delete project: ${err.message}`)
+    }
+  }
+
+  /**
    * Delete a file from the current project
    * @param {string} fileName - Internal file name to delete
    * @returns {Promise<object>} - {deleted: number, remaining: number}
@@ -430,6 +458,28 @@ If the information is not in the context, say "I don't have information about th
     } catch (err) {
       console.error('Error updating last queried time:', err)
       // Don't throw - this is not critical
+    }
+  }
+
+  /**
+   * Recursively delete a directory and all its contents
+   * @private
+   */
+  async _deleteDirectoryRecursive(dirHandle, dirName) {
+    try {
+      for await (const entry of dirHandle.entries()) {
+        const [name, handle] = entry
+
+        if (handle.kind === 'directory') {
+          await this._deleteDirectoryRecursive(handle, name)
+        }
+
+        await dirHandle.removeEntry(name, { recursive: true })
+      }
+
+      await this.rootDirHandle.removeEntry(dirName, { recursive: true })
+    } catch (err) {
+      throw new Error(`Failed to delete directory "${dirName}": ${err.message}`)
     }
   }
 
