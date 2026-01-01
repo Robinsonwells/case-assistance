@@ -11,16 +11,16 @@ export default class ProjectManager {
   constructor(rootDirHandle) {
     // Root directory handle from File System Access API
     this.rootDirHandle = rootDirHandle
-    
+
     // Current project state
     this.currentProjectDir = null
     this.currentProjectName = null
-    
+
     // Service instances
     this.chunker = new DocumentChunker()
     this.embeddingGenerator = new EmbeddingGenerator()
     this.ragRetriever = new RAGRetriever()
-    this.perplexityAPI = new PerplexityAPI(process.env.REACT_APP_PERPLEXITY_API_KEY)
+    this.perplexityAPI = new PerplexityAPI()
   }
 
   /**

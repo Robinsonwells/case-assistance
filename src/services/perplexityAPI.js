@@ -1,53 +1,55 @@
 /**
  * PerplexityAPI - Integration with Perplexity API for LLM-powered answers
- * 
+ *
  * What's happening:
  * 1. RAG pipeline retrieves relevant chunks from documents
- * 2. Chunks are sent as context to Perplexity API
+ * 2. Chunks are sent as context to Perplexity API via secure edge function
  * 3. Perplexity generates answer grounded in the provided context
  * 4. Answer is returned to user
- * 
+ *
  * Privacy & Security:
  * - Perplexity offers Zero Data Retention (ZDR) - data not used for training
  * - Only chunk context is sent (never full documents)
- * - API key should be kept secure in environment variables
- * 
+ * - API key is stored securely server-side (not exposed in client bundle)
+ * - All requests go through Supabase Edge Function proxy
+ *
  * Model Choice: sonar-reasoning-pro
  * - Advanced reasoning for complex legal analysis
  * - Fast API responses
  * - Fact-grounded responses
- * 
+ *
  * Temperature: 0.3 (low)
  * - Favors factual, deterministic responses
  * - Good for legal/compliance Q&A where accuracy matters more than creativity
  */
 export default class PerplexityAPI {
-  constructor(apiKey) {
-    // API authentication
-    this.apiKey = apiKey
+  constructor() {
+    // Supabase edge function endpoint
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-    // Perplexity API endpoint
-    this.baseURL = 'https://api.perplexity.com/chat/completions'
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase configuration missing')
+      throw new Error('Supabase configuration not found')
+    }
+
+    this.edgeFunctionURL = `${supabaseUrl}/functions/v1/perplexity-proxy`
+    this.supabaseAnonKey = supabaseAnonKey
 
     // Request configuration
     this.model = 'sonar-reasoning-pro'
     this.temperature = 0.3 // Low temperature for factual responses
     this.timeout = 30000 // 30 second timeout
-
-    // Validate API key on init
-    if (!apiKey || apiKey.trim().length === 0) {
-      console.warn('PerplexityAPI initialized without API key. Queries will fail.')
-    }
   }
 
   /**
    * Query Perplexity with context from RAG
-   * 
+   *
    * This is the final step in the RAG pipeline:
    * - Takes context (retrieved document chunks)
-   * - Sends question + context to Perplexity
+   * - Sends question + context to Perplexity via edge function
    * - Returns answer grounded in provided context
-   * 
+   *
    * @param {object} params - Query parameters
    * @param {string} params.systemPrompt - System instructions for the model
    * @param {string} params.context - Document chunks as context (from RAG retrieval)
@@ -69,37 +71,26 @@ export default class PerplexityAPI {
         throw new Error('question must be a non-empty string')
       }
 
-      if (!this.apiKey) {
-        throw new Error('API key not configured. Please set REACT_APP_PERPLEXITY_API_KEY environment variable.')
-      }
-
-      console.log('Querying Perplexity API...')
+      console.log('Querying Perplexity API via edge function...')
       console.log(`Context length: ${context.length} characters`)
       console.log(`Question: ${question.substring(0, 100)}...`)
 
       // Build the request payload
       const requestPayload = {
+        systemPrompt,
+        context,
+        question,
         model: this.model,
-        messages: [
-          {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: `Context:\n\n${context}\n\nQuestion: ${question}`
-          }
-        ],
         temperature: this.temperature
       }
 
       // Make the API request with timeout
       const response = await this._fetchWithTimeout(
-        this.baseURL,
+        this.edgeFunctionURL,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'Authorization': `Bearer ${this.supabaseAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(requestPayload)
@@ -134,7 +125,7 @@ export default class PerplexityAPI {
   /**
    * Simple query without context
    * Useful for direct questions without document context
-   * 
+   *
    * @param {string} prompt - Question to ask
    * @returns {Promise<string>} - Answer from Perplexity
    */
@@ -144,31 +135,22 @@ export default class PerplexityAPI {
         throw new Error('prompt must be a non-empty string')
       }
 
-      if (!this.apiKey) {
-        throw new Error('API key not configured')
-      }
-
-      console.log('Querying Perplexity API (simple)...')
+      console.log('Querying Perplexity API (simple) via edge function...')
 
       // Build simple request (no context)
       const requestPayload = {
+        prompt,
         model: this.model,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ],
         temperature: this.temperature
       }
 
       // Make the API request
       const response = await this._fetchWithTimeout(
-        this.baseURL,
+        this.edgeFunctionURL,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'Authorization': `Bearer ${this.supabaseAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(requestPayload)
@@ -229,7 +211,7 @@ export default class PerplexityAPI {
   /**
    * Handle API error responses
    * Provides specific error messages for different HTTP status codes
-   * 
+   *
    * @private
    * @param {Response} response - Fetch response object
    */
@@ -242,7 +224,7 @@ export default class PerplexityAPI {
         break
 
       case 401:
-        errorMessage = 'Unauthorized - API key invalid or expired. Check REACT_APP_PERPLEXITY_API_KEY.'
+        errorMessage = 'Unauthorized - API key invalid or expired. Check PERPLEXITY_API_KEY configuration.'
         break
 
       case 403:
@@ -265,8 +247,8 @@ export default class PerplexityAPI {
         // Try to extract error message from response
         try {
           const errorData = await response.json()
-          if (errorData.error?.message) {
-            errorMessage = errorData.error.message
+          if (errorData.error) {
+            errorMessage = typeof errorData.error === 'string' ? errorData.error : errorData.error.message || errorMessage
           }
         } catch (e) {
           // Fallback to status text
@@ -280,28 +262,23 @@ export default class PerplexityAPI {
   /**
    * Check API connectivity and authentication
    * Useful for diagnostics and status checks
-   * 
+   *
    * @returns {Promise<boolean>} - True if API is accessible
    */
   async checkConnectivity() {
     try {
-      if (!this.apiKey) {
-        console.warn('API key not configured')
-        return false
-      }
-
       // Try a simple request
       const response = await this._fetchWithTimeout(
-        this.baseURL,
+        this.edgeFunctionURL,
         {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
+            'Authorization': `Bearer ${this.supabaseAnonKey}`,
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
+            prompt: 'test',
             model: this.model,
-            messages: [{ role: 'user', content: 'test' }],
             temperature: 0.1
           })
         },
@@ -318,16 +295,16 @@ export default class PerplexityAPI {
   /**
    * Get API configuration info
    * Useful for debugging
-   * 
+   *
    * @returns {object} - Configuration details
    */
   getConfig() {
     return {
       model: this.model,
-      baseURL: this.baseURL,
+      edgeFunctionURL: this.edgeFunctionURL,
       temperature: this.temperature,
       timeout: this.timeout,
-      apiKeyConfigured: !!this.apiKey
+      supabaseConfigured: !!this.supabaseAnonKey
     }
   }
 }
