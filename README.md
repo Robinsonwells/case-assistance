@@ -157,17 +157,24 @@ Transformers.js (for embeddings)
 
 Development tools
 
-Step 3: Configure Supabase Edge Function
-The application uses a Supabase Edge Function to proxy all Perplexity API calls, ensuring your API key is NEVER exposed to the browser.
+Step 3: Configure Perplexity API Key (for Vercel deployment)
+The application uses a Vercel serverless function at `/api/perplexity` to proxy all Perplexity API calls, ensuring your API key is NEVER exposed to the browser.
 
-1. Visit your [Supabase Dashboard](https://supabase.com/dashboard/project/hlfeookqxwvrygiyvsxj)
-2. Navigate to **Settings** → **Edge Functions** → **Secrets**
-3. Add a new secret:
+**For local development:**
+The serverless function will work in dev mode without configuration (though API calls will fail without the key).
+
+**For Vercel deployment:**
+1. Push your code to GitHub
+2. Deploy to Vercel (see Deployment section below)
+3. In Vercel Dashboard: **Project → Settings → Environment Variables**
+4. Add:
    - Name: `PERPLEXITY_API_KEY`
-   - Value: Your Perplexity API key (get one from [Perplexity API Dashboard](https://www.perplexity.ai/settings/api))
-4. Click **Save**
+   - Value: Your Perplexity API key (get from [Perplexity API Dashboard](https://www.perplexity.ai/settings/api))
+   - Environments: Production, Preview, Development
+5. Click **Save**
+6. Redeploy if needed
 
-The edge function is already deployed and will automatically use this secret.
+The serverless function at `/api/perplexity.js` will automatically use this secret.
 
 Step 4: Verify Installation
 bash
@@ -203,7 +210,7 @@ console.log('Component state:', state)
 
 // Check API calls
 // Open Network tab in DevTools
-// Look for POST requests to your Supabase edge function
+// Look for POST requests to /api/perplexity
 
 // Check localStorage
 console.log(localStorage.getItem('key'))
@@ -212,11 +219,9 @@ console.log(localStorage.getItem('key'))
 // Open IndexedDB in DevTools > Application > IndexedDB
 
 Environment Variables in Development
-The application uses Vite environment variables (prefixed with VITE_):
-- `VITE_SUPABASE_URL` - Your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
+The application uses standard Vite environment variables for any client-side configuration needs.
 
-IMPORTANT: The Perplexity API key is NEVER exposed to the browser. It exists only as a server-side secret in Supabase.
+IMPORTANT: The Perplexity API key is NEVER exposed to the browser. It exists only as a server-side secret in Vercel environment variables and is accessed by the `/api/perplexity` serverless function.
 Build & Deployment
 Production Build
 bash
@@ -252,13 +257,15 @@ Select your repository
 
 Click "Import"
 
-Step 3: Configure Environment Variables (Optional)
-If you need custom Supabase configuration, add these in Vercel:
+Step 3: Configure Environment Variables
+In Vercel Dashboard: **Settings → Environment Variables**
 
-- `VITE_SUPABASE_URL` - Your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` - Your Supabase anonymous key
+**Required:**
+- Name: `PERPLEXITY_API_KEY`
+- Value: Your Perplexity API key (from [Perplexity API Dashboard](https://www.perplexity.ai/settings/api))
+- Environments: Production, Preview, Development
 
-IMPORTANT: The Perplexity API key should ONLY be configured in Supabase (not Vercel). See Step 3 in the installation section above.
+This is the ONLY environment variable you need. The serverless function at `/api/perplexity` will use it to make secure API calls.
 
 Step 4: Deploy
 Vercel auto-deploys on git push

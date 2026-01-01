@@ -5,15 +5,15 @@ import { callPerplexity } from '../lib/apiClient'
  *
  * What's happening:
  * 1. RAG pipeline retrieves relevant chunks from documents
- * 2. Chunks are sent as context to Perplexity API via secure edge function
+ * 2. Chunks are sent as context to Perplexity API via secure Vercel serverless function
  * 3. Perplexity generates answer grounded in the provided context
  * 4. Answer is returned to user
  *
  * Privacy & Security:
  * - Perplexity offers Zero Data Retention (ZDR) - data not used for training
  * - Only chunk context is sent (never full documents)
- * - API key is stored securely server-side (not exposed in client bundle)
- * - All requests go through Supabase Edge Function proxy
+ * - API key is stored securely server-side in Vercel (not exposed in client bundle)
+ * - All requests go through Vercel serverless function at /api/perplexity
  * - NO API keys are ever exposed to the browser
  *
  * Model Choice: sonar-reasoning-pro
@@ -37,7 +37,7 @@ export default class PerplexityAPI {
    *
    * This is the final step in the RAG pipeline:
    * - Takes context (retrieved document chunks)
-   * - Sends question + context to Perplexity via edge function
+   * - Sends question + context to Perplexity via Vercel serverless function
    * - Returns answer grounded in provided context
    *
    * @param {object} params - Query parameters
@@ -60,7 +60,7 @@ export default class PerplexityAPI {
         throw new Error('question must be a non-empty string')
       }
 
-      console.log('Querying Perplexity API via edge function...')
+      console.log('Querying Perplexity API via Vercel serverless function...')
       console.log(`Context length: ${context.length} characters`)
       console.log(`Question: ${question.substring(0, 100)}...`)
 
@@ -101,7 +101,7 @@ export default class PerplexityAPI {
         throw new Error('prompt must be a non-empty string')
       }
 
-      console.log('Querying Perplexity API (simple) via edge function...')
+      console.log('Querying Perplexity API (simple) via Vercel serverless function...')
 
       const requestPayload = {
         prompt,
@@ -128,8 +128,8 @@ export default class PerplexityAPI {
       model: this.model,
       temperature: this.temperature,
       timeout: this.timeout,
-      proxyUsed: 'Supabase Edge Function (perplexity-proxy)',
-      apiKeyExposure: 'NEVER - API key only exists server-side'
+      proxyUsed: 'Vercel Serverless Function (/api/perplexity)',
+      apiKeyExposure: 'NEVER - API key only exists server-side in Vercel'
     }
   }
 }
