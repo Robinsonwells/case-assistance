@@ -1,5 +1,47 @@
 import React, { useState, useEffect, useRef } from 'react'
 
+function MessageContent({ content }) {
+  const [showThinking, setShowThinking] = useState(false)
+
+  const thinkMatch = content.match(/<think>([\s\S]*?)<\/think>([\s\S]*)/i)
+
+  if (!thinkMatch) {
+    return <p className="whitespace-pre-wrap break-words">{content}</p>
+  }
+
+  const thinkingContent = thinkMatch[1].trim()
+  const actualContent = thinkMatch[2].trim()
+
+  return (
+    <div>
+      {actualContent && (
+        <p className="whitespace-pre-wrap break-words mb-3">{actualContent}</p>
+      )}
+      <div className="border-t border-slate-600 pt-2">
+        <button
+          onClick={() => setShowThinking(!showThinking)}
+          className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-300 transition-colors"
+        >
+          <svg
+            className={`w-4 h-4 transition-transform ${showThinking ? 'rotate-90' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+          <span>{showThinking ? 'Hide' : 'Show'} thinking process</span>
+        </button>
+        {showThinking && (
+          <div className="mt-2 p-3 bg-slate-800/50 rounded text-xs text-slate-300 whitespace-pre-wrap break-words">
+            {thinkingContent}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function ChatPanel({ projectManager, projectName, documentCount }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -113,7 +155,11 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
                       : 'bg-slate-700 text-slate-100'
                   }`}
                 >
-                  <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  {msg.role === 'user' ? (
+                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                  ) : (
+                    <MessageContent content={msg.content} />
+                  )}
                   <div className="flex items-center gap-2 mt-2 text-xs opacity-70">
                     <span>{msg.timestamp}</span>
                     {msg.role === 'assistant' && msg.sourcesCount > 0 && (
