@@ -30,17 +30,34 @@ export default class DocumentChunker {
     // Patterns for incomplete sentence endings that should trigger validation failure
     // Using \b for word boundaries to avoid partial matches
     this.incompletePhrases = [
+      // Abbreviations at end (most common problem)
       /\b(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,           // Ends with title
+      /\bby\s+(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,      // "by Dr." pattern specifically
+      /\b(Assessment|Report|Notes)\s+by\s+\w+\.\s*$/i,  // "Assessment by [Name]." 
+      
+      // Corporate/entity endings
       /\b(Inc|Corp|Ltd|LLC)\.\s*$/i,            // Ends with corporate suffix
+      
+      // Legal citation patterns - CRITICAL FIX: Allow index 0 too
       /\(Admin\.\s*R\.\s*$/i,                    // Incomplete citation "(Admin. R."
       /\(Admin\.\s*R\.\s*at\s*$/i,              // Incomplete citation "(Admin. R. at"
+      /\(Admin\.\s*R\.\s+\d+\)?$/i,             // "(Admin. R. 509)" pattern - ends too early
+      
+      // Initials and single letters
       /\b[A-Z]\.\s*$/,                           // Single initial "J."
       /\b[A-Z]\.\s+[A-Z]\.\s*$/,                // Double initial "J. K."
+      
+      // Reporter abbreviations
       /\sU\.\s*S\.\s*$/,                         // "U. S." at end
       /\sF\.\s*3d\s*$/,                          // "F. 3d" incomplete
       /\b3d\s*$/,                                // "3d" incomplete
+      
+      // Incomplete citations/references
       /\bNo\.\s*$/i,                             // "No." without number
       /\bvs\.\s*$/i,                             // "vs." without party
+      /\bat\s*$/i,                               // "at" alone
+      
+      // Punctuation at end (fragment markers)
       /\($/,                                      // Trailing open paren
       /\[$/,                                      // Trailing open bracket
       /,\s*$/,                                    // Trailing comma
@@ -623,7 +640,8 @@ export default class DocumentChunker {
       }
     }
 
-    if (incompleteMatchStart > 0) {
+    // CRITICAL FIX: Changed from > 0 to >= 0 to catch phrases at position 0
+    if (incompleteMatchStart >= 0) {
       // Found where incomplete phrase starts
       // Now trim to the last complete sentence BEFORE this position
       const textBeforeIncomplete = chunkText.substring(0, incompleteMatchStart)
