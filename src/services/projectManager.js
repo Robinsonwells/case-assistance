@@ -319,13 +319,13 @@ export default class ProjectManager {
         throw new Error('No documents found in project. Please upload some documents first.')
       }
 
-      // Retrieve relevant chunks using RAG (hybrid search)
-      // Pass embeddingGenerator for semantic search + keyword matching
+      // Retrieve relevant chunks using RAG (semantic search)
+      // Pass embeddingGenerator for semantic similarity
       const relevantChunks = await this.ragRetriever.findRelevantChunks(
         question,
         chunks,
         10, // top K
-        this.embeddingGenerator // Enable hybrid search
+        this.embeddingGenerator // Enable semantic search
       )
 
       // Build context from relevant chunks
@@ -352,9 +352,8 @@ If the information is not in the context, say "I don't have information about th
       const formattedChunks = relevantChunks.map(chunk => ({
         content: chunk.text,
         fileName: chunk.metadata?.sourceFile || 'Unknown file',
-        similarity: chunk.score, // Score is already normalized to 0-1 with hybrid search
-        semanticScore: chunk.semanticScore, // Individual semantic score (if available)
-        keywordScore: chunk.keywordScore // Individual keyword score (if available)
+        similarity: chunk.score, // Score is cosine similarity (0-1)
+        semanticScore: chunk.semanticScore // Semantic similarity score
       }))
 
       return {
