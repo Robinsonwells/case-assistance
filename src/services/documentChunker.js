@@ -29,33 +29,35 @@ export default class DocumentChunker {
 
     // Patterns for incomplete sentence endings that should trigger validation failure
     // Using \b for word boundaries to avoid partial matches
+    // CRITICAL: Made Dr/Prof patterns optional-dot to catch OCR artifacts
     this.incompletePhrases = [
-      // Abbreviations at end (most common problem)
-      /\b(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,           // Ends with title
-      /\bby\s+(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,      // "by Dr." pattern specifically
-      /\b(Assessment|Report|Notes)\s+by\s+\w+\.\s*$/i,  // "Assessment by [Name]." 
+      // Abbreviations at end (most common problem) - optional dot for OCR errors
+      /\b(Dr|Mr|Mrs|Ms|Prof)\.?\s*$/i,           // Ends with title (with or without dot)
+      /\bby\s+(Dr|Mr|Mrs|Ms|Prof)\.?\s*$/i,      // "by Dr." pattern specifically
+      /\bby\s*$/i,                                // Ends with "by" alone
+      /\b(Assessment|Report|Notes)\s+by\s+\w*\.?\s*$/i,  // "Assessment by [Name]."
       
       // Corporate/entity endings
-      /\b(Inc|Corp|Ltd|LLC)\.\s*$/i,            // Ends with corporate suffix
+      /\b(Inc|Corp|Ltd|LLC)\.?\s*$/i,            // Ends with corporate suffix
       
-      // Legal citation patterns - CRITICAL FIX: Allow index 0 too
-      /\(Admin\.\s*R\.\s*$/i,                    // Incomplete citation "(Admin. R."
-      /\(Admin\.\s*R\.\s*at\s*$/i,              // Incomplete citation "(Admin. R. at"
-      /\(Admin\.\s*R\.\s+\d+\)?$/i,             // "(Admin. R. 509)" pattern - ends too early
+      // Legal citation patterns
+      /\(Admin\.\s*R\.?\s*$/i,                    // Incomplete citation "(Admin. R." (optional second dot)
+      /\(Admin\.\s*R\.?\s+at\s*$/i,              // Incomplete citation "(Admin. R. at"
+      /\(Admin\.\s*R\.?\s+\d+\)?$/i,             // "(Admin. R. 509)" early endings
       
       // Initials and single letters
-      /\b[A-Z]\.\s*$/,                           // Single initial "J."
-      /\b[A-Z]\.\s+[A-Z]\.\s*$/,                // Double initial "J. K."
+      /\b[A-Z]\.?\s*$/,                           // Single initial "J." or "J"
+      /\b[A-Z]\.?\s+[A-Z]\.?\s*$/,               // Double initial "J. K." or similar
       
       // Reporter abbreviations
-      /\sU\.\s*S\.\s*$/,                         // "U. S." at end
-      /\sF\.\s*3d\s*$/,                          // "F. 3d" incomplete
+      /\sU\.\s*S\.?\s*$/,                         // "U. S." at end
+      /\sF\.?\s*3d\s*$/,                          // "F. 3d" incomplete
       /\b3d\s*$/,                                // "3d" incomplete
       
       // Incomplete citations/references
-      /\bNo\.\s*$/i,                             // "No." without number
-      /\bvs\.\s*$/i,                             // "vs." without party
-      /\bat\s*$/i,                               // "at" alone
+      /\bNo\.?\s*$/i,                             // "No." without number
+      /\bvs\.?\s*$/i,                             // "vs." without party
+      /\bat\s*$/i,                                // "at" alone
       
       // Punctuation at end (fragment markers)
       /\($/,                                      // Trailing open paren
@@ -436,6 +438,7 @@ export default class DocumentChunker {
    * - Court identifiers (e.g., "UNITED STATES COURT OF APPEALS")
    * - Case names (e.g., "Smith v. Jones")
    * - Date stamps (e.g., "Filed: January 1, 2023")
+   * - Assessment/Report headers (e.g., "• Physical Ability Assessment by Dr.")
    *
    * @private
    * @param {string} line - Trimmed line to check
@@ -471,7 +474,13 @@ export default class DocumentChunker {
       /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,
 
       // Section headers
-      /^(BACKGROUND|OPINION|STANDARD OF REVIEW|CONCLUSION|FACTS|ANALYSIS|DISCUSSION)$/i
+      /^(BACKGROUND|OPINION|STANDARD OF REVIEW|CONCLUSION|FACTS|ANALYSIS|DISCUSSION)$/i,
+      
+      // NEW: Assessment/Report headers (bullets, bullet-style artifacts)
+      /^•\s+(Physical|Mental|Psychiatric)\s+(Ability\s+)?Assessment/i,
+      /^•\s+(Physical|Mental|Psychiatric)\s+(Ability\s+)?Assessment.*by\s+(Dr|Mr|Ms|Mrs|Prof)/i,
+      /^\s*•\s+\w+.*Assessment.*by/i,
+      /^(Physical|Mental|Psychiatric)\s+(Ability\s+)?Assessment.*by\s+(Dr|Mr|Ms|Mrs|Prof)/i,
     ]
 
     for (const pattern of headerPatterns) {
@@ -628,38 +637,47 @@ export default class DocumentChunker {
     }
 
     // CHECK INCOMPLETE ENDINGS: Detect chunks ending with incomplete phrases
-    // Examples: "Dr." "Inc." "(Admin. R." "and" "to" etc.
-    let incompleteMatchStart = -1
-
+    // STRATEGY: Hard chop the incomplete phrase, then clean up trailing artifacts
     for (const pattern of this.incompletePhrases) {
       const match = chunkText.match(pattern)
-      if (match && match.index !== undefined) {
-        incompleteMatchStart = match.index
-        console.warn(`⚠️  Chunk ends with incomplete phrase: "${match[0]}"`)
-        break
-      }
-    }
-
-    // CRITICAL FIX: Changed from > 0 to >= 0 to catch phrases at position 0
-    if (incompleteMatchStart >= 0) {
-      // Found where incomplete phrase starts
-      // Now trim to the last complete sentence BEFORE this position
-      const textBeforeIncomplete = chunkText.substring(0, incompleteMatchStart)
       
-      // Find the last sentence-ending punctuation in the text before incomplete phrase
-      const lastPeriodIdx = textBeforeIncomplete.lastIndexOf('.')
-      const lastExclamIdx = textBeforeIncomplete.lastIndexOf('!')
-      const lastQuestIdx = textBeforeIncomplete.lastIndexOf('?')
-      const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+      // Found an incomplete phrase at the end
+      if (match && match.index !== undefined) {
+        console.warn(`⚠️  Chunk ends with incomplete phrase: "${match[0]}"`)
+        
+        // STEP 1: HARD CHOP - Remove the incomplete phrase completely
+        chunkText = chunkText.substring(0, match.index).trim()
+        console.log(`   ✓ Hard chopped incomplete phrase`)
+        
+        // STEP 2: CLEANUP - Remove trailing garbage that might remain
+        // Remove trailing prepositions/conjunctions (by, at, from, in, of, to, with)
+        const trailingPrep = /\s+(by|at|from|in|of|to|with|and|or)\s*$/i
+        if (trailingPrep.test(chunkText)) {
+          chunkText = chunkText.replace(trailingPrep, '').trim()
+          console.log(`   ✓ Removed trailing preposition`)
+        }
 
-      if (lastSentenceEnd > textBeforeIncomplete.length * 0.4) {
-        // Found a substantial previous sentence
-        chunkText = textBeforeIncomplete.substring(0, lastSentenceEnd + 1).trim()
-        console.log(`   ✓ Trimmed incomplete ending`)
-      } else {
-        // No good sentence before incomplete phrase - discard chunk
-        console.error('   ✗ Incomplete phrase too early in chunk. Discarding.')
-        return ''
+        // Remove trailing bullets, dashes, or special separators
+        chunkText = chunkText.replace(/[\s•\-–—|]+$/, '').trim()
+
+        // STEP 3: RE-VERIFY ENDING - Make sure it ends with punctuation
+        if (!/[.!?"']$/.test(chunkText)) {
+          // Find last valid sentence end
+          const lastPeriodIdx = chunkText.lastIndexOf('.')
+          const lastExclamIdx = chunkText.lastIndexOf('!')
+          const lastQuestIdx = chunkText.lastIndexOf('?')
+          const lastQuoteIdx = chunkText.lastIndexOf('"')
+          
+          const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx, lastQuoteIdx)
+          
+          if (lastSentenceEnd > chunkText.length * 0.5) {
+            chunkText = chunkText.substring(0, lastSentenceEnd + 1).trim()
+            console.log(`   ✓ Trimmed to valid sentence boundary after cleanup`)
+          }
+        }
+        
+        // Only need to match one pattern to trigger the cleanup
+        break 
       }
     }
 
