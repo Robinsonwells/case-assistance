@@ -1,7 +1,7 @@
 import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-const WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.530/pdf.worker.min.mjs'
-pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER_URL
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 /**
  * PDFExtractor - Extracts text content from PDF files
