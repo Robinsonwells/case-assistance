@@ -176,6 +176,22 @@ export default class ProjectManager {
       // Chunk the document
       const chunks = this.chunker.chunkHybrid(fileText)
 
+      // Validate chunks for quality issues
+      const validationReport = this.chunker.getChunkValidationReport(chunks)
+      console.log('Chunk Validation Report:', validationReport.report)
+
+      if (!validationReport.isValid) {
+        console.warn('⚠️  Chunk quality issues detected:')
+        validationReport.issues.forEach(issue => {
+          console.warn(`  - ${issue.severity}: ${issue.issue} in chunk ${issue.chunkIndex}`)
+          if (issue.text) {
+            console.warn(`    "${issue.text}..."`)
+          }
+        })
+      } else {
+        console.log('✓ All chunks passed validation')
+      }
+
       // Extract text from chunks for batch embedding
       const chunkTexts = chunks.map(chunk => chunk.text)
 

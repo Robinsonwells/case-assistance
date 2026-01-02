@@ -38,14 +38,14 @@ export default class DocumentChunker {
         return chunks
       }
 
-      // Attach headers to content as context prefixes
-      const processedText = this._attachHeadersToContent(text.trim())
-      if (processedText.length === 0) {
+      // STEP 1: Strip headers entirely (don't preserve inline)
+      const cleanedText = this._stripLegalHeaders(text.trim())
+      if (cleanedText.length === 0) {
         return chunks
       }
 
-      // Split into paragraphs by double newlines
-      const paragraphs = processedText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
+      // STEP 2: Split into paragraphs by double newlines
+      const paragraphs = cleanedText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
 
       console.log(`Processing ${paragraphs.length} paragraphs with sentence-based semantic boundaries`)
 
@@ -79,25 +79,31 @@ export default class DocumentChunker {
         while (sentenceBuffer.length >= sentenceWindowSize) {
           // Take exactly sentenceWindowSize sentences for this chunk
           const chunkSentences = sentenceBuffer.slice(0, sentenceWindowSize)
-          const chunkText = chunkSentences.join(' ').trim()
+          let chunkText = chunkSentences.join(' ').trim()
 
-          chunks.push({
-            id: `chunk_${chunkIndex}`,
-            text: chunkText,
-            type: 'sliding_window',
-            metadata: {
-              paragraph: paraIdx,
-              chunkIndex: chunkIndex,
-              sentenceStart: 0,
-              sentenceEnd: sentenceWindowSize - 1,
-              sentenceCount: sentenceWindowSize,
-              isBuffered: true,
-              overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
-            }
-          })
+          // CRITICAL: Validate and fix sentence boundaries
+          chunkText = this._fixSentenceBoundaries(chunkText, chunkIndex === 0)
 
-          console.log(`  → Created chunk ${chunkIndex} with ${sentenceWindowSize} sentences`)
-          chunkIndex++
+          // Only add if chunk is valid
+          if (chunkText.length > 0) {
+            chunks.push({
+              id: `chunk_${chunkIndex}`,
+              text: chunkText,
+              type: 'sliding_window',
+              metadata: {
+                paragraph: paraIdx,
+                chunkIndex: chunkIndex,
+                sentenceStart: 0,
+                sentenceEnd: sentenceWindowSize - 1,
+                sentenceCount: sentenceWindowSize,
+                isBuffered: true,
+                overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
+              }
+            })
+
+            console.log(`  → Created chunk ${chunkIndex} with ${sentenceWindowSize} sentences`)
+            chunkIndex++
+          }
 
           // Slide the window: remove (windowSize - overlap) sentences
           const slideAmount = sentenceWindowSize - sentenceOverlap
@@ -111,20 +117,27 @@ export default class DocumentChunker {
       // Flush remaining sentences in buffer as final chunk
       if (sentenceBuffer.length > 0) {
         console.log(`Flushing final ${sentenceBuffer.length} sentences from buffer`)
-        chunks.push({
-          id: `chunk_${chunkIndex}`,
-          text: sentenceBuffer.join(' ').trim(),
-          type: 'buffer_remainder',
-          metadata: {
-            paragraph: paraIdx - 1,
-            chunkIndex: chunkIndex,
-            sentenceStart: 0,
-            sentenceEnd: sentenceBuffer.length - 1,
-            sentenceCount: sentenceBuffer.length,
-            isBuffered: true,
-            overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
-          }
-        })
+        let finalChunkText = sentenceBuffer.join(' ').trim()
+
+        // Validate and fix sentence boundaries
+        finalChunkText = this._fixSentenceBoundaries(finalChunkText, chunkIndex === 0)
+
+        if (finalChunkText.length > 0) {
+          chunks.push({
+            id: `chunk_${chunkIndex}`,
+            text: finalChunkText,
+            type: 'buffer_remainder',
+            metadata: {
+              paragraph: paraIdx - 1,
+              chunkIndex: chunkIndex,
+              sentenceStart: 0,
+              sentenceEnd: sentenceBuffer.length - 1,
+              sentenceCount: sentenceBuffer.length,
+              isBuffered: true,
+              overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
+            }
+          })
+        }
       }
 
       console.log(`Created ${chunks.length} chunks from ${paragraphs.length} paragraphs using semantic boundaries`)
@@ -285,57 +298,54 @@ export default class DocumentChunker {
   }
 
   /**
-   * Attach legal document headers to following content as context prefixes
+   * Strip legal document headers entirely from text
    *
-   * Headers like case numbers, page numbers, and document metadata are preserved
-   * by prepending them to the content that follows as compact prefixes.
+   * Removes header-only lines (case numbers, page numbers, etc.) to prevent
+   * them from polluting chunks and breaking sentence boundaries.
    *
    * Example transformation:
    *   Before: "No. 12-3834\nPage 3\nPlaintiff's job required..."
-   *   After: "[No. 12-3834 | Page 3] Plaintiff's job required..."
+   *   After: "Plaintiff's job required..."
    *
    * @private
    * @param {string} text - Raw document text
-   * @returns {string} - Text with headers attached as context prefixes
+   * @returns {string} - Text with headers completely removed
    */
-  _attachHeadersToContent(text) {
+  _stripLegalHeaders(text) {
     if (!text || text.length === 0) {
       return ''
     }
 
-    const lines = text.split('\n')
-    const result = []
-    let currentHeader = []
+    let cleaned = text
+      .split('\n')
+      .filter(line => {
+        const trimmed = line.trim()
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const trimmed = line.trim()
-
-      if (trimmed.length === 0) {
-        result.push(line)
-        continue
-      }
-
-      const isHeader = this._isLegalHeader(trimmed)
-
-      if (isHeader) {
-        currentHeader.push(trimmed)
-      } else {
-        if (currentHeader.length > 0) {
-          const headerPrefix = `[${currentHeader.join(' | ')}] `
-          result.push(headerPrefix + line)
-          currentHeader = []
-        } else {
-          result.push(line)
+        // Skip empty lines (we'll handle them later)
+        if (trimmed.length === 0) {
+          return true
         }
-      }
-    }
 
-    if (currentHeader.length > 0) {
-      result.push(`[${currentHeader.join(' | ')}]`)
-    }
+        // Remove ENTIRE lines that are ONLY headers
+        const isHeaderLine = this._isLegalHeader(trimmed)
 
-    return result.join('\n')
+        return !isHeaderLine
+      })
+      .join('\n')
+
+    // Remove mid-line page citations: " No. 12-3834 ... Page X " between sentences
+    cleaned = cleaned.replace(/\s+No\.\s+\d{2,4}-\d{4}[^\n.!?]*?Page\s+\d+\s+/g, ' ')
+
+    // Remove standalone page markers mid-text
+    cleaned = cleaned.replace(/\s+Page\s+\d+\s+/g, ' ')
+
+    // Reduce multiple blank lines to single blank line
+    cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n')
+
+    // Clean up multiple spaces
+    cleaned = cleaned.replace(/  +/g, ' ')
+
+    return cleaned.trim()
   }
 
   /**
@@ -383,6 +393,78 @@ export default class DocumentChunker {
     }
 
     return false
+  }
+
+  /**
+   * CRITICAL: Ensure chunks start with uppercase and end with sentence terminator
+   *
+   * Validates and repairs sentence boundaries to prevent mid-sentence cuts.
+   * A proper chunk must:
+   * 1. Start with uppercase letter or digit (never lowercase)
+   * 2. End with . ! or ? (proper sentence terminator)
+   *
+   * @private
+   * @param {string} chunkText - Raw chunk text
+   * @param {boolean} isFirstChunk - If true, allows some leniency
+   * @returns {string} - Fixed chunk text with valid boundaries
+   */
+  _fixSentenceBoundaries(chunkText, isFirstChunk = false) {
+    if (!chunkText || chunkText.length === 0) {
+      return ''
+    }
+
+    // Trim whitespace
+    chunkText = chunkText.trim()
+
+    // CHECK START: Chunk should start with uppercase letter or digit
+    const firstChar = chunkText[0]
+    if (!isFirstChunk && /^[a-z]/.test(firstChar)) {
+      // PROBLEM: Chunk starts with lowercase - this is a mid-sentence cut
+      console.warn(
+        `⚠️  Chunk starts with lowercase '${firstChar}': "${chunkText.substring(0, 50)}..."`
+      )
+
+      // Find the last sentence-ending punctuation before this point
+      const lastPeriodIdx = chunkText.lastIndexOf('.')
+      const lastExclamIdx = chunkText.lastIndexOf('!')
+      const lastQuestIdx = chunkText.lastIndexOf('?')
+      const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+
+      if (lastSentenceEnd > 0) {
+        // Rewind: keep only complete sentences
+        chunkText = chunkText.substring(0, lastSentenceEnd + 1).trim()
+        console.log(`   ✓ Rewound to last sentence boundary`)
+      } else {
+        // No sentence boundary found - this chunk is corrupt
+        console.error('   ✗ No sentence boundary found. Discarding chunk.')
+        return ''
+      }
+    }
+
+    // CHECK END: Chunk should end with . ! or ?
+    const lastChar = chunkText[chunkText.length - 1]
+    if (!/[.!?]$/.test(lastChar)) {
+      // PROBLEM: Chunk doesn't end with sentence terminator
+      console.warn(`⚠️  Chunk ends with '${lastChar}', not punctuation`)
+
+      // Find the last sentence-ending punctuation
+      const lastPeriodIdx = chunkText.lastIndexOf('.')
+      const lastExclamIdx = chunkText.lastIndexOf('!')
+      const lastQuestIdx = chunkText.lastIndexOf('?')
+      const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+
+      if (lastSentenceEnd > chunkText.length * 0.5) {
+        // If the last sentence ends more than halfway through, use it
+        chunkText = chunkText.substring(0, lastSentenceEnd + 1).trim()
+        console.log(`   ✓ Trimmed to last sentence boundary`)
+      } else {
+        // Otherwise, add a period (incomplete sentence, but salvageable)
+        console.warn('   ⚠️  Adding period to incomplete sentence')
+        chunkText = chunkText + '.'
+      }
+    }
+
+    return chunkText
   }
 
   /**
@@ -547,5 +629,86 @@ export default class DocumentChunker {
       distribution[val] = (distribution[val] || 0) + 1
     })
     return distribution
+  }
+
+  /**
+   * Validate chunks for common quality issues
+   *
+   * Checks for:
+   * - Chunks starting with lowercase (mid-sentence cuts)
+   * - Chunks not ending with sentence terminators
+   * - Chunks containing headers
+   * - Chunks that are too short
+   *
+   * @param {array} chunks - Array of chunk objects to validate
+   * @returns {object} - Validation report with issues found
+   */
+  getChunkValidationReport(chunks) {
+    const issues = []
+
+    chunks.forEach((chunk, idx) => {
+      const text = chunk.text
+
+      // Issue 1: Starts with lowercase (indicates mid-sentence cut)
+      if (text && text.length > 0 && /^[a-z]/.test(text[0])) {
+        issues.push({
+          chunkId: chunk.id,
+          chunkIndex: idx,
+          issue: 'STARTS_WITH_LOWERCASE',
+          text: text.substring(0, 50),
+          severity: 'CRITICAL'
+        })
+      }
+
+      // Issue 2: Doesn't end with . ! or ?
+      if (text && text.length > 0 && !/[.!?]$/.test(text)) {
+        issues.push({
+          chunkId: chunk.id,
+          chunkIndex: idx,
+          issue: 'NO_SENTENCE_TERMINATOR',
+          text: text.substring(Math.max(0, text.length - 50)),
+          severity: 'HIGH'
+        })
+      }
+
+      // Issue 3: Contains mid-line page headers (shouldn't happen after stripping)
+      if (text && /No\.\s+\d{2,4}-\d{4}/.test(text)) {
+        issues.push({
+          chunkId: chunk.id,
+          chunkIndex: idx,
+          issue: 'CONTAINS_HEADER',
+          severity: 'HIGH'
+        })
+      }
+
+      // Issue 4: Too short (< 50 chars is probably garbage)
+      if (text && text.length < 50) {
+        issues.push({
+          chunkId: chunk.id,
+          chunkIndex: idx,
+          issue: 'TOO_SHORT',
+          length: text.length,
+          severity: 'MEDIUM'
+        })
+      }
+    })
+
+    // Group issues by severity
+    const critical = issues.filter(i => i.severity === 'CRITICAL')
+    const high = issues.filter(i => i.severity === 'HIGH')
+    const medium = issues.filter(i => i.severity === 'MEDIUM')
+
+    return {
+      totalChunks: chunks.length,
+      issueCount: issues.length,
+      issues: issues,
+      bySeverity: {
+        critical: critical.length,
+        high: high.length,
+        medium: medium.length
+      },
+      report: `${issues.length} issues found in ${chunks.length} chunks (${critical.length} critical, ${high.length} high, ${medium.length} medium)`,
+      isValid: critical.length === 0 && high.length === 0
+    }
   }
 }

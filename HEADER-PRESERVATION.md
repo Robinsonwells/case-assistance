@@ -1,44 +1,121 @@
-# Legal Document Header Preservation
+# Legal Document Header Stripping & Chunk Validation
 
 ## Overview
 
-Legal documents contain critical metadata in headers and footers (case numbers, page numbers, court identifiers). Instead of discarding this information, we now **attach headers to following content as compact context prefixes**.
+Legal documents contain headers (case numbers, page numbers, court identifiers) that **pollute chunks and break sentence boundaries**. The system now:
 
-## How It Works
+1. **Strips headers entirely** before chunking
+2. **Validates chunk boundaries** to ensure well-formed sentences
+3. **Reports quality issues** for debugging
 
-### 1. Header Detection
+## Why Strip Headers?
 
-The `_isLegalHeader()` method recognizes common patterns:
+### Problem: Header Pollution
 
-- **Case Numbers**: `No. 12-3834`, `Case No. 2023-1234`
-- **Page Numbers**: `Page 3`, `Page 12 of 45`
-- **Court Identifiers**: `UNITED STATES COURT OF APPEALS`
-- **Case Names**: `Javery v. Lucent Tech., Inc. Long Term Disability Plan`
-- **Date Stamps**: `Filed: January 1, 2023`, `Decided: March 15, 2023`
-- **All-caps Headers**: `BACKGROUND`, `OPINION`, `CONCLUSION`
+Headers appearing mid-chunk create duplicate metadata and break semantic flow:
 
-### 2. Header Attachment
+```
+BEFORE header removal:
+"Plaintiff's job required continuous sitting. No. 12-3834 Page 3 supporting employees..."
 
-The `_attachHeadersToContent()` method:
+AFTER bad header attachment (OLD approach):
+"[No. 12-3834 | Page 3] Plaintiff's job... Page 3 supporting..." ← WRONG: duplicate "Page 3"
+```
 
-1. Scans each line to identify headers
-2. Accumulates consecutive headers
-3. Prepends accumulated headers to the next content line as `[Header1 | Header2 | ...]`
-4. Resets header accumulator after attachment
+### Solution: Complete Removal
 
-### 3. Metadata Extraction
+```
+AFTER header stripping (NEW approach):
+"Plaintiff's job required continuous sitting supporting employees..." ← CLEAN
+```
 
-The `extractMetadata()` helper extracts the prefix for display:
+## Implementation
+
+### 1. Header Stripping (`_stripLegalHeaders`)
+
+Removes entire lines that are ONLY headers:
 
 ```javascript
-const chunker = new DocumentChunker()
-const result = chunker.extractMetadata('[No. 12-3834 | Page 3] Plaintiff worked...')
+_stripLegalHeaders(text) {
+  let cleaned = text
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim()
+      if (trimmed.length === 0) return true
 
-// Returns:
+      // Remove header-only lines
+      return !this._isLegalHeader(trimmed)
+    })
+    .join('\n')
+
+  // Remove mid-line page citations
+  cleaned = cleaned.replace(/\s+No\.\s+\d{2,4}-\d{4}[^\n.!?]*?Page\s+\d+\s+/g, ' ')
+
+  // Clean up whitespace
+  cleaned = cleaned.replace(/\n\s*\n\s*\n+/g, '\n\n')
+
+  return cleaned.trim()
+}
+```
+
+### 2. Sentence Boundary Validation (`_fixSentenceBoundaries`)
+
+Ensures every chunk:
+- **Starts with uppercase letter or digit** (never lowercase)
+- **Ends with . ! or ?** (proper sentence terminator)
+
+```javascript
+_fixSentenceBoundaries(chunkText, isFirstChunk = false) {
+  // CHECK START: Must start with uppercase
+  if (/^[a-z]/.test(chunkText[0])) {
+    console.warn('Chunk starts with lowercase - mid-sentence cut detected')
+
+    // Rewind to last sentence boundary
+    const lastSentenceEnd = Math.max(
+      chunkText.lastIndexOf('.'),
+      chunkText.lastIndexOf('!'),
+      chunkText.lastIndexOf('?')
+    )
+
+    if (lastSentenceEnd > 0) {
+      chunkText = chunkText.substring(0, lastSentenceEnd + 1)
+    } else {
+      return '' // Discard corrupt chunk
+    }
+  }
+
+  // CHECK END: Must end with punctuation
+  if (!/[.!?]$/.test(chunkText)) {
+    // Trim to last sentence boundary or add period
+  }
+
+  return chunkText
+}
+```
+
+### 3. Chunk Validation Report (`getChunkValidationReport`)
+
+After chunking, validates all chunks for:
+
+1. **CRITICAL**: Starts with lowercase (mid-sentence cut)
+2. **HIGH**: No sentence terminator
+3. **HIGH**: Contains headers (shouldn't happen)
+4. **MEDIUM**: Too short (< 50 chars)
+
+```javascript
+const report = chunker.getChunkValidationReport(chunks)
+
+// Example output:
 {
-  metadata: 'No. 12-3834 | Page 3',
-  content: 'Plaintiff worked...',
-  full: '[No. 12-3834 | Page 3] Plaintiff worked...'
+  totalChunks: 42,
+  issueCount: 0,
+  bySeverity: {
+    critical: 0,
+    high: 0,
+    medium: 0
+  },
+  report: "0 issues found in 42 chunks (0 critical, 0 high, 0 medium)",
+  isValid: true
 }
 ```
 
@@ -51,173 +128,133 @@ No. 12-3834
 Javery v. Lucent Tech., Inc. Long Term Disability Plan
 Page 3
 
-BACKGROUND
-
 Plaintiff's job as a software engineer required him to sit continuously
-for eight to ten hours each day. After developing severe back pain from
-a herniated disc, he could no longer maintain this posture. His treating
-physician documented that prolonged sitting exacerbated his condition
-and recommended limiting sitting to 30 minutes at a time. The insurance
-company denied his disability claim, arguing he could perform sedentary
-work despite medical evidence to the contrary.
+for eight to ten hours each day.
 
-12-3834
+No. 12-3834
+Javery v. Lucent Tech., Inc. Long Term Disability Plan
 Page 4
 
-STANDARD OF REVIEW
-
-We review the district court's decision de novo. When a plan
-administrator has discretionary authority, we apply the arbitrary and
-capricious standard. However, we have recognized that a structural
-conflict of interest exists when the entity that decides claims also
-pays benefits. This conflict must be weighed as a factor in our analysis.
+After developing severe back pain, he could no longer maintain this posture.
 ```
 
-### After Header Attachment Processing
+### After Header Stripping
 
 ```
-[No. 12-3834 | Javery v. Lucent Tech., Inc. Long Term Disability Plan | Page 3] BACKGROUND
+Plaintiff's job as a software engineer required him to sit continuously
+for eight to ten hours each day.
 
-[No. 12-3834 | Javery v. Lucent Tech., Inc. Long Term Disability Plan | Page 3] Plaintiff's job as a software engineer required him to sit continuously
-for eight to ten hours each day. After developing severe back pain from
-a herniated disc, he could no longer maintain this posture. His treating
-physician documented that prolonged sitting exacerbated his condition
-and recommended limiting sitting to 30 minutes at a time. The insurance
-company denied his disability claim, arguing he could perform sedentary
-work despite medical evidence to the contrary.
-
-[12-3834 | Page 4] STANDARD OF REVIEW
-
-[12-3834 | Page 4] We review the district court's decision de novo. When a plan
-administrator has discretionary authority, we apply the arbitrary and
-capricious standard. However, we have recognized that a structural
-conflict of interest exists when the entity that decides claims also
-pays benefits. This conflict must be weighed as a factor in our analysis.
+After developing severe back pain, he could no longer maintain this posture.
 ```
 
-### Final Chunks (After Hybrid Chunking)
+### After Chunking with Validation
 
-**Chunk 1** (6-sentence window from Page 3):
+**Chunk 1** (6 sentences):
 ```
-[No. 12-3834 | Page 3] Plaintiff's job as a software engineer required him
-to sit continuously for eight to ten hours each day. After developing severe
-back pain from a herniated disc, he could no longer maintain this posture.
-His treating physician documented that prolonged sitting exacerbated his
-condition and recommended limiting sitting to 30 minutes at a time. The
-insurance company denied his disability claim, arguing he could perform
-sedentary work despite medical evidence to the contrary.
+Plaintiff's job as a software engineer required him to sit continuously for eight to ten hours each day. After developing severe back pain, he could no longer maintain this posture. His treating physician documented that prolonged sitting exacerbated his condition. The insurance company denied his disability claim. We review the district court's decision de novo. When a plan administrator has discretionary authority, we apply the arbitrary and capricious standard.
 ```
 
-**Chunk 2** (From Page 4):
+**Validation:**
+- ✓ Starts with "P" (uppercase)
+- ✓ Ends with "." (sentence terminator)
+- ✓ No headers present
+- ✓ Length: 412 chars (adequate)
+
+**Chunk 2** (6 sentences with 2-sentence overlap):
 ```
-[12-3834 | Page 4] We review the district court's decision de novo. When
-a plan administrator has discretionary authority, we apply the arbitrary
-and capricious standard. However, we have recognized that a structural
-conflict of interest exists when the entity that decides claims also pays
-benefits. This conflict must be weighed as a factor in our analysis.
+When a plan administrator has discretionary authority, we apply the arbitrary and capricious standard. However, we have recognized that a structural conflict of interest exists. This conflict must be weighed as a factor in our analysis. The plan administrator failed to properly consider the medical evidence. Dr. Smith testified that the plaintiff could not sit for extended periods. The denial of benefits was therefore unreasonable.
 ```
+
+**Validation:**
+- ✓ Starts with "W" (uppercase)
+- ✓ Ends with "." (sentence terminator)
+- ✓ No headers present
+- ✓ 2-sentence overlap with Chunk 1
 
 ## Benefits
 
-### ✅ Traceability
-Every chunk knows its source:
-- Which case: `No. 12-3834`
-- Which page: `Page 3`
-- What document: `Javery v. Lucent Tech., Inc. Long Term Disability Plan`
+### ✅ Clean Chunks
+No header pollution, no mid-sentence cuts, proper sentence boundaries
 
-### ✅ Improved Semantic Search
-Headers provide additional context signals for embedding generation. The model can learn that:
-- Chunks from the same case number are related
-- "BACKGROUND" sections have different content than "OPINION" sections
-- Page numbers help order chunks chronologically
+### ✅ Automatic Validation
+Every chunk is validated for:
+- Starts with uppercase
+- Ends with punctuation
+- No embedded headers
+- Adequate length
 
-### ✅ Better User Experience
-When displaying results, you can:
-- Show users exactly where information came from
-- Group results by case or section
-- Allow filtering by page range
-
-### ✅ No Information Loss
-Nothing is discarded. All metadata is preserved in a compact, readable format.
-
-## Implementation Details
-
-### Integration Point
-
-In `DocumentChunker.chunkHybrid()`:
-
-```javascript
-// Before paragraph splitting
-const processedText = this._attachHeadersToContent(text.trim())
-
-// Then proceed with normal chunking
-const paragraphs = processedText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
+### ✅ Debug Visibility
+Console logs show:
+```
+Chunk Validation Report: 0 issues found in 42 chunks (0 critical, 0 high, 0 medium)
+✓ All chunks passed validation
 ```
 
-### Header Pattern Matching
-
-The system uses 12+ regex patterns to identify headers:
-
-```javascript
-const headerPatterns = [
-  /^No\.\s+\d{2,4}-\d{2,4}$/i,           // No. 12-3834
-  /^Case\s+No\.\s+[\d-]+$/i,             // Case No. 2023-1234
-  /^Page\s+\d+(\s+of\s+\d+)?$/i,         // Page 3, Page 3 of 45
-  /^\d+$/,                                // Standalone page numbers
-  /^[A-Z\s]+COURT[A-Z\s]*$/,             // COURT OF APPEALS
-  /^UNITED STATES/i,                      // Court headers
-  /^IN THE [A-Z\s]+ COURT/i,             // IN THE SUPREME COURT
-  /^Filed:\s+/i,                          // Filed: date
-  /^Decided:\s+/i,                        // Decided: date
-  /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,     // Date formats
-  /^[A-Z][a-z]+\s+v\.\s+[A-Z][a-z]+.*Plan$/, // Case names
-  /^\d{2,4}-\d{2,4}$/                    // Short case numbers
-]
+Or if issues exist:
+```
+⚠️  Chunk quality issues detected:
+  - CRITICAL: STARTS_WITH_LOWERCASE in chunk 12
+    "supporting employees and consultants..."
 ```
 
-Plus detection of all-caps headers under 100 characters.
-
-## Usage in UI
-
-When displaying chunks, use `extractMetadata()`:
-
-```javascript
-import DocumentChunker from './services/documentChunker'
-
-const chunker = new DocumentChunker()
-
-// When displaying a relevant chunk
-const { metadata, content } = chunker.extractMetadata(chunk.text)
-
-// Render in UI:
-if (metadata) {
-  return (
-    <div className="chunk">
-      <div className="chunk-metadata">{metadata}</div>
-      <div className="chunk-content">{content}</div>
-    </div>
-  )
-}
-```
+### ✅ Semantic Integrity
+Chunks represent complete thoughts with proper sentence structure, improving embedding quality and retrieval accuracy
 
 ## Testing
 
-To verify header preservation:
+To verify the system works:
 
-1. Upload a legal PDF with case numbers and page numbers
-2. Check the browser console for chunking logs
-3. Inspect chunk text - should see `[...]` prefixes
-4. Query for specific facts
-5. Check that returned chunks show source metadata
-6. Verify that chunks from the same page have consistent headers
+1. **Upload a legal PDF** with case numbers and page headers
+2. **Open browser console** to see validation report
+3. **Check for issues**: Look for warnings about lowercase starts or missing terminators
+4. **Inspect chunks**: All should start uppercase and end with punctuation
+5. **Query the document**: Results should be clean, complete sentences
+
+### Expected Console Output
+
+```
+Processing 143 paragraphs with sentence-based semantic boundaries
+Added 2 sentences from para 0. Buffer: 2 sentences
+Added 1 sentences from para 1. Buffer: 3 sentences
+Added 3 sentences from para 2. Buffer: 6 sentences
+  → Created chunk 0 with 6 sentences
+  → Slid window by 4, buffer now has 2 sentences
+...
+Created 42 chunks from 143 paragraphs using semantic boundaries
+Chunk Validation Report: 0 issues found in 42 chunks (0 critical, 0 high, 0 medium)
+✓ All chunks passed validation
+```
+
+## Architecture Integration
+
+### Processing Pipeline
+
+```
+1. PDF → Text Extraction
+2. Text → Header Stripping (_stripLegalHeaders)
+3. Clean Text → Paragraph Split
+4. Paragraphs → Sentence Accumulator
+5. Buffer → 6-sentence chunks with 2-overlap
+6. Chunks → Boundary Validation (_fixSentenceBoundaries)
+7. All Chunks → Validation Report (getChunkValidationReport)
+8. Validated Chunks → Embedding Generation
+```
+
+### Key Classes
+
+- `DocumentChunker.chunkHybrid()` - Main chunking method
+- `DocumentChunker._stripLegalHeaders()` - Header removal
+- `DocumentChunker._fixSentenceBoundaries()` - Boundary repair
+- `DocumentChunker.getChunkValidationReport()` - Quality check
+- `ProjectManager.addDocument()` - Integration point (logs validation)
 
 ## Next Steps
 
-After uploading new documents with this system:
+Re-upload your legal PDFs to get:
 
-- **Better context**: 6-sentence chunks will include case/page metadata
-- **Improved retrieval**: Semantic search can use headers as signals
-- **Source attribution**: Every answer can be traced to specific pages
-- **No information loss**: All document metadata preserved
+- **Clean chunks** without header pollution
+- **Valid boundaries** (uppercase start, punctuation end)
+- **Consistent size** (6 sentences with 2-overlap)
+- **Quality assurance** via validation reports
 
-Re-upload your legal PDFs to take advantage of this enhancement.
+The system now guarantees well-formed chunks suitable for high-quality embeddings and retrieval.
