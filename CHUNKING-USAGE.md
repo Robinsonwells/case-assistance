@@ -2,96 +2,138 @@
 
 ## Overview
 
-The DocumentChunker uses **continuous sentence accumulation with sliding windows** and **legal header preservation**. This creates consistent 6-sentence chunks with 2-sentence overlap, regardless of paragraph structure.
+The DocumentChunker uses **continuous sentence accumulation with sliding windows**, **aggressive header stripping**, and **automatic boundary validation**. This creates consistent 8-sentence chunks with 2-sentence overlap, guaranteed to start with uppercase and end with proper punctuation.
 
 ## Chunking Strategy
 
 ### Sentence Accumulator with Sliding Window
 
-The chunker uses a **continuous sentence buffer** that accumulates sentences across paragraph boundaries until reaching the target chunk size (default: 6 sentences), then creates overlapping chunks.
+The chunker uses a **continuous sentence buffer** that accumulates sentences across paragraph boundaries until reaching the target chunk size (default: 8 sentences), then creates overlapping chunks with validated boundaries.
 
 **How It Works:**
 
-1. **Accumulate**: Sentences from all paragraphs are added to a buffer
-2. **Chunk**: When buffer reaches 6 sentences, create a chunk
-3. **Slide**: Remove 4 sentences (6 - 2 overlap), keep 2 for next chunk
-4. **Repeat**: Continue accumulating and chunking throughout document
-5. **Flush**: Remaining sentences become final chunk
+1. **Strip Headers**: Remove all legal headers before processing
+2. **Accumulate**: Sentences from all paragraphs are added to a buffer
+3. **Chunk**: When buffer reaches 8 sentences, create a chunk
+4. **Validate**: Check boundaries (uppercase start, punctuation end)
+5. **Slide**: Remove 6 sentences (8 - 2 overlap), keep 2 for next chunk
+6. **Repeat**: Continue accumulating and chunking throughout document
+7. **Flush**: Remaining sentences become final chunk
+8. **Report**: Validation report shows any quality issues
 
 **Configuration:**
-- Window Size: 6 sentences (customizable)
+- Window Size: 8 sentences (customizable)
 - Overlap: 2 sentences (customizable)
-- Step: 4 sentences (windowSize - overlap)
+- Step: 6 sentences (windowSize - overlap)
 
 **Example Flow:**
 
 ```
-Document sentences: S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12
+Document sentences: S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 S15 S16
 
-Buffer accumulates: [S1, S2, S3, S4, S5, S6]
-→ Chunk 1: [S1, S2, S3, S4, S5, S6]
-→ Slide by 4, keep [S5, S6] in buffer
+Buffer accumulates: [S1, S2, S3, S4, S5, S6, S7, S8]
+→ Chunk 1: [S1, S2, S3, S4, S5, S6, S7, S8]
+→ Validate: Starts uppercase ✓, Ends with punctuation ✓
+→ Slide by 6, keep [S7, S8] in buffer
 
-Buffer continues: [S5, S6, S7, S8, S9, S10]
-→ Chunk 2: [S5, S6, S7, S8, S9, S10] (overlaps with Chunk 1)
-→ Slide by 4, keep [S9, S10] in buffer
+Buffer continues: [S7, S8, S9, S10, S11, S12, S13, S14]
+→ Chunk 2: [S7, S8, S9, S10, S11, S12, S13, S14] (overlaps with Chunk 1)
+→ Validate: Starts uppercase ✓, Ends with punctuation ✓
+→ Slide by 6, keep [S13, S14] in buffer
 
-Buffer continues: [S9, S10, S11, S12]
-→ Chunk 3: [S9, S10, S11, S12] (final chunk, less than 6 sentences)
+Buffer continues: [S13, S14, S15, S16]
+→ Chunk 3: [S13, S14, S15, S16] (final chunk, less than 8 sentences)
+→ Validate: Starts uppercase ✓, Ends with punctuation ✓
 ```
 
 **Benefits:**
 
-- **Consistent Size**: All chunks (except the last) have exactly 6 sentences
+- **Consistent Size**: All chunks (except the last) have exactly 8 sentences
+- **Larger Context**: 8-sentence chunks capture more complete thoughts (vs. previous 6-sentence chunks)
 - **Paragraph Agnostic**: Works with any paragraph structure (handles legal PDFs with frequent line breaks)
 - **Continuous Context**: 2-sentence overlap preserves context between chunks
 - **No Information Loss**: Every sentence appears in at least one chunk
+- **Validated Quality**: Every chunk guaranteed to be well-formed
 
-## Legal Header Preservation
+## Legal Header Stripping
 
-**NEW:** Document headers (case numbers, page numbers, court identifiers) are now preserved as compact context prefixes.
+**CRITICAL:** Document headers (case numbers, page numbers, court identifiers) are **completely removed** before chunking to prevent pollution and boundary violations.
+
+### Why Strip Headers?
+
+Headers appearing mid-chunk create:
+- **Duplicate metadata**: "Page 3" appearing multiple times
+- **Broken boundaries**: Chunks starting with lowercase after headers
+- **Semantic noise**: Legal boilerplate interfering with embeddings
 
 ### How It Works
 
 Headers like:
 ```
 No. 12-3834
+Javery v. Lucent Tech., Inc. Long Term Disability Plan
 Page 3
+
+Plaintiff's job as a software engineer...
 ```
 
-Are automatically detected and attached to the following content:
+Are **completely removed**:
 ```
-[No. 12-3834 | Page 3] Plaintiff's job as a software engineer...
+Plaintiff's job as a software engineer...
 ```
 
-### Recognized Header Types
+### Recognized Header Patterns
 
-- Case numbers: `No. 12-3834`, `Case No. 2023-1234`
-- Page numbers: `Page 3`, `Page 12 of 45`
-- Court identifiers: `UNITED STATES COURT OF APPEALS`
-- Case names: `Smith v. Jones`
-- Date stamps: `Filed: January 1, 2023`
-- Section headers: `BACKGROUND`, `OPINION` (all-caps)
+The system aggressively strips:
 
-### Extracting Metadata
+- **Case numbers**: `No. 12-3834`, `Case No. 2023-1234`, `12-3834`
+- **Case names**: `Javery v. Lucent Tech., Inc. Long Term Disability Plan`
+- **Page numbers**: `Page 3`, `Page 12 of 45`
+- **Court identifiers**: `UNITED STATES COURT OF APPEALS`
+- **Date stamps**: `Filed: January 1, 2023`
+- **Section headers**: `BACKGROUND`, `OPINION`, `STANDARD OF REVIEW`
 
-Use the `extractMetadata()` helper to separate headers from content:
+Patterns match headers:
+- At start of lines (`^No. 12-3834`)
+- Anywhere in lines (`supporting No. 12-3834 employees`)
+- As trailing fragments (`...sentence. No. 12-3834 Javery v. Lucent`)
 
-```javascript
-const { metadata, content } = chunker.extractMetadata(chunk.text)
+### Automatic Boundary Validation
 
-// metadata: "No. 12-3834 | Page 3" (or null if no header)
-// content: "Plaintiff's job as a software engineer..."
-// full: original text with header prefix
+After stripping, every chunk is validated:
+
+**Requirements:**
+1. ✓ Starts with **uppercase letter or digit**
+2. ✓ Ends with **. ! or ?**
+3. ✓ No embedded headers
+4. ✓ Adequate length (>50 chars)
+
+**Auto-Fix:**
+- If chunk starts with lowercase → rewind to last sentence boundary
+- If chunk ends without punctuation → trim to last sentence
+- If trailing headers detected → strip and re-validate
+
+**Console Output:**
+```
+Chunk Validation Report: 0 issues found in 42 chunks (0 critical, 0 high, 0 medium)
+✓ All chunks passed validation
+```
+
+Or if issues found:
+```
+⚠️  Chunk quality issues detected:
+  - CRITICAL: STARTS_WITH_LOWERCASE in chunk 12
+    "supporting employees and consultants..."
 ```
 
 ### Benefits
 
-- **Traceability**: Every chunk knows its source case and page
-- **Better Search**: Headers provide additional context for semantic search
-- **No Loss**: All document metadata preserved in compact format
+- **Clean Chunks**: No header pollution or formatting artifacts
+- **Valid Boundaries**: Guaranteed uppercase start, punctuation end
+- **Better Embeddings**: Pure semantic content without legal boilerplate
+- **Larger Context**: 8-sentence chunks capture complete technical details
 
-See `HEADER-PRESERVATION.md` for detailed examples and implementation details.
+See `HEADER-PRESERVATION.md` for detailed examples and boundary validation logic.
 
 ## Usage
 
@@ -102,11 +144,22 @@ import DocumentChunker from './src/services/documentChunker.js'
 const chunker = new DocumentChunker()
 const text = "Your legal document here..."
 
-// Use default settings (6 sentences, 2 overlap)
+// Use default settings (8 sentences, 2 overlap)
 const chunks = chunker.chunkHybrid(text)
 
 // Or customize window size and overlap
-const chunks = chunker.chunkHybrid(text, 8, 3) // 8 sentences, 3 overlap
+const chunks = chunker.chunkHybrid(text, 10, 3) // 10 sentences, 3 overlap
+
+// Validate chunk quality
+const report = chunker.getChunkValidationReport(chunks)
+console.log(report.report)
+// "0 issues found in 42 chunks (0 critical, 0 high, 0 medium)"
+
+if (!report.isValid) {
+  report.issues.forEach(issue => {
+    console.warn(`${issue.severity}: ${issue.issue} in chunk ${issue.chunkIndex}`)
+  })
+}
 ```
 
 ### Accessing Chunk Metadata

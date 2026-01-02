@@ -15,20 +15,20 @@ export default class DocumentChunker {
    * - Never cuts mid-sentence (sentence boundaries only)
    * - Respects paragraph boundaries (natural semantic breaks)
    * - Small paragraphs (1-2 sentences): Buffered and merged with next paragraph
-   * - Just-right paragraphs (3-5 sentences): Kept as single intact chunk
-   * - Large paragraphs (6+ sentences): Sliding window with overlap
+   * - Just-right paragraphs (3-7 sentences): Kept as single intact chunk
+   * - Large paragraphs (8+ sentences): Sliding window with overlap
    *
    * Sliding Window for Large Paragraphs:
-   * - Window Size: sentenceWindowSize sentences (default: 6)
+   * - Window Size: sentenceWindowSize sentences (default: 8)
    * - Overlap: sentenceOverlap sentences (default: 2)
-   * - Step: windowSize - overlap (e.g., 6 - 2 = 4)
+   * - Step: windowSize - overlap (e.g., 8 - 2 = 6)
    *
    * @param {string} text - Raw document text to chunk
-   * @param {number} sentenceWindowSize - Number of sentences per chunk for large paragraphs (default: 6)
+   * @param {number} sentenceWindowSize - Number of sentences per chunk for large paragraphs (default: 8)
    * @param {number} sentenceOverlap - Number of overlapping sentences between chunks (default: 2)
    * @returns {array} - Array of chunk objects with metadata
    */
-  chunkHybrid(text, sentenceWindowSize = 6, sentenceOverlap = 2) {
+  chunkHybrid(text, sentenceWindowSize = 8, sentenceOverlap = 2) {
     try {
       const chunks = []
 
@@ -368,18 +368,31 @@ export default class DocumentChunker {
     }
 
     const headerPatterns = [
-      /^No\.\s+\d{2,4}-\d{2,4}$/i,
-      /^Case\s+No\.\s+[\d-]+$/i,
-      /^Page\s+\d+(\s+of\s+\d+)?$/i,
+      // Case numbers (relaxed - match anywhere in line)
+      /No\.\s+\d{2,4}-\d{2,4}/i,
+      /Case\s+No\.\s+[\d-]+/i,
+      /^\d{2,4}-\d{2,4}$/,
+
+      // Full case name patterns (e.g., "Javery v. Lucent Tech., Inc. Long Term Disability Plan")
+      /^[A-Z][a-z]+\s+v\.\s+[A-Z][a-z]+.*Plan$/,
+      /v\.\s+[A-Z][a-z]+.*(?:Plan|Inc\.|Corp\.|LLC)$/,
+
+      // Page numbers
+      /^Page\s+\d+/i,
       /^\d+$/,
+
+      // Court identifiers
       /^[A-Z\s]+COURT[A-Z\s]*$/,
       /^UNITED STATES/i,
       /^IN THE [A-Z\s]+ COURT/i,
+
+      // Dates
       /^Filed:\s+/i,
       /^Decided:\s+/i,
       /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,
-      /^[A-Z][a-z]+\s+v\.\s+[A-Z][a-z]+.*Plan$/,
-      /^\d{2,4}-\d{2,4}$/
+
+      // Section headers
+      /^(BACKGROUND|OPINION|STANDARD OF REVIEW|CONCLUSION|FACTS|ANALYSIS|DISCUSSION)$/i
     ]
 
     for (const pattern of headerPatterns) {
@@ -461,6 +474,40 @@ export default class DocumentChunker {
         // Otherwise, add a period (incomplete sentence, but salvageable)
         console.warn('   ⚠️  Adding period to incomplete sentence')
         chunkText = chunkText + '.'
+      }
+    }
+
+    // CRITICAL: Strip trailing headers that leaked through
+    // Common pattern: "...sentence. No. 12-3834 Javery v. Lucent Tech., Inc."
+    const trailingHeaderPatterns = [
+      /\s+No\.\s+\d{2,4}-\d{4}.*$/i,
+      /\s+\d{2,4}-\d{4}.*$/,
+      /\s+Page\s+\d+.*$/i,
+      /\s+[A-Z][a-z]+\s+v\.\s+[A-Z][a-z]+.*$/
+    ]
+
+    for (const pattern of trailingHeaderPatterns) {
+      if (pattern.test(chunkText)) {
+        const beforeStrip = chunkText
+        chunkText = chunkText.replace(pattern, '').trim()
+
+        // If we stripped something, make sure chunk still ends with punctuation
+        if (chunkText !== beforeStrip) {
+          console.log(`   ✓ Stripped trailing header`)
+
+          if (!/[.!?]$/.test(chunkText)) {
+            // Find last punctuation after stripping
+            const lastPeriodIdx = chunkText.lastIndexOf('.')
+            const lastExclamIdx = chunkText.lastIndexOf('!')
+            const lastQuestIdx = chunkText.lastIndexOf('?')
+            const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+
+            if (lastSentenceEnd > 0) {
+              chunkText = chunkText.substring(0, lastSentenceEnd + 1).trim()
+            }
+          }
+        }
+        break // Only apply first matching pattern
       }
     }
 
@@ -610,8 +657,8 @@ export default class DocumentChunker {
       overlapStats,
       rules: {
         small: 'Paragraphs with 1-2 sentences are buffered and merged with next paragraph',
-        justRight: 'Paragraphs with 3-5 sentences are kept as single intact chunks',
-        large: 'Paragraphs with 6+ sentences use sliding window (6 sentences, 2 overlap)'
+        justRight: 'Paragraphs with 3-7 sentences are kept as single intact chunks',
+        large: 'Paragraphs with 8+ sentences use sliding window (8 sentences, 2 overlap)'
       }
     }
   }
