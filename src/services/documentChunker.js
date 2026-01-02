@@ -651,10 +651,12 @@ export default class DocumentChunker {
         
         // STEP 2: CLEANUP - Remove trailing garbage that might remain
         // Remove trailing prepositions/conjunctions (by, at, from, in, of, to, with)
-        const trailingPrep = /\s+(by|at|from|in|of|to|with|and|or)\s*$/i
-        if (trailingPrep.test(chunkText)) {
-          chunkText = chunkText.replace(trailingPrep, '').trim()
-          console.log(`   ✓ Removed trailing preposition`)
+        // CRITICAL UPDATE: Added "Assessment", "Report", "Notes" to garbage list to catch
+        // artifacts like "• Physical Ability Assessment" left behind after removing "by Dr."
+        const trailingGarbage = /\s+(by|at|from|in|of|to|with|and|or|Assessment|Report|Notes|Ability)\s*$/i
+        if (trailingGarbage.test(chunkText)) {
+          chunkText = chunkText.replace(trailingGarbage, '').trim()
+          console.log(`   ✓ Removed trailing garbage word`)
         }
 
         // Remove trailing bullets, dashes, or special separators
@@ -678,6 +680,29 @@ export default class DocumentChunker {
         
         // Only need to match one pattern to trigger the cleanup
         break 
+      }
+    }
+
+    // NUCLEAR OPTION: Hard-coded suffix removal for known stubborn artifacts
+    // These strings, if found at the end of a chunk, are ALWAYS garbage to be removed.
+    // They override any other logic because they are specific artifacts from this document set.
+    const stubbornSuffixes = [
+      /•\s*Physical\s*Ability\s*Assessment\s*by\s*Dr\.?(\s|$)/i,
+      /•\s*Physical\s*Ability\s*Assessment\s*by(\s|$)/i,
+      /\(Admin\.\s*R\.?(\s|$)/i,
+      /\(Admin\.\s*R(\s|$)/i,
+      /\s+by\s+Dr\.?(\s|$)/i,
+      /\s+by\s+Dr(\s|$)/i
+    ];
+
+    for (const suffix of stubbornSuffixes) {
+      if (suffix.test(chunkText)) {
+        console.warn(`☢️ NUCLEAR CHOP: Found stubborn suffix "${suffix}"`);
+        chunkText = chunkText.replace(suffix, '').trim();
+        
+        // Clean up any double punctuation left behind
+        // e.g. "work. " -> "work."
+        chunkText = chunkText.replace(/\s+([.!?”"])$/, '$1');
       }
     }
 
