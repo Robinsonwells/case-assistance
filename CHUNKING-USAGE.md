@@ -2,52 +2,50 @@
 
 ## Overview
 
-The DocumentChunker uses **sentence-based chunking with semantic paragraph boundaries** and **legal header preservation**. This ensures chunks never cut mid-sentence, intelligently handle different paragraph sizes, and preserve critical document metadata.
+The DocumentChunker uses **continuous sentence accumulation with sliding windows** and **legal header preservation**. This creates consistent 6-sentence chunks with 2-sentence overlap, regardless of paragraph structure.
 
-## Chunking Rules
+## Chunking Strategy
 
-### Rule 1: Small Paragraphs (1-2 sentences)
-**Action:** Buffered and merged with the next paragraph
+### Sentence Accumulator with Sliding Window
 
-**Why:** Small paragraphs are often headers or section titles that need context from the following paragraph.
+The chunker uses a **continuous sentence buffer** that accumulates sentences across paragraph boundaries until reaching the target chunk size (default: 6 sentences), then creates overlapping chunks.
 
-**Example:**
-```
-Background                     ← 1 sentence (small)
+**How It Works:**
 
-The case began in 2023.        ← 1 sentence (next paragraph)
-```
-**Result:** Both merged into single chunk: "Background. The case began in 2023."
-
-### Rule 2: Just-Right Paragraphs (3-5 sentences)
-**Action:** Kept as single intact chunk
-
-**Why:** A 3-5 sentence paragraph typically represents one complete thought unit.
-
-**Example:**
-```
-The court applied three tests. First, the reasonable person standard.
-Second, the causation analysis. Third, the damages calculation.
-```
-**Result:** Entire paragraph becomes one chunk (not split)
-
-### Rule 3: Large Paragraphs (6+ sentences)
-**Action:** Sliding window with overlap
-
-**Why:** Dense paragraphs need to be broken up, but overlap preserves context.
+1. **Accumulate**: Sentences from all paragraphs are added to a buffer
+2. **Chunk**: When buffer reaches 6 sentences, create a chunk
+3. **Slide**: Remove 4 sentences (6 - 2 overlap), keep 2 for next chunk
+4. **Repeat**: Continue accumulating and chunking throughout document
+5. **Flush**: Remaining sentences become final chunk
 
 **Configuration:**
-- Window Size: 6 sentences
-- Overlap: 2 sentences
-- Step: 4 sentences
+- Window Size: 6 sentences (customizable)
+- Overlap: 2 sentences (customizable)
+- Step: 4 sentences (windowSize - overlap)
 
-**Example:**
-```
-S1. S2. S3. S4. S5. S6. S7. S8. S9. S10.
+**Example Flow:**
 
-Chunk 1: [S1, S2, S3, S4, S5, S6]
-Chunk 2: [S5, S6, S7, S8, S9, S10]  ← Overlaps with S5, S6
 ```
+Document sentences: S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12
+
+Buffer accumulates: [S1, S2, S3, S4, S5, S6]
+→ Chunk 1: [S1, S2, S3, S4, S5, S6]
+→ Slide by 4, keep [S5, S6] in buffer
+
+Buffer continues: [S5, S6, S7, S8, S9, S10]
+→ Chunk 2: [S5, S6, S7, S8, S9, S10] (overlaps with Chunk 1)
+→ Slide by 4, keep [S9, S10] in buffer
+
+Buffer continues: [S9, S10, S11, S12]
+→ Chunk 3: [S9, S10, S11, S12] (final chunk, less than 6 sentences)
+```
+
+**Benefits:**
+
+- **Consistent Size**: All chunks (except the last) have exactly 6 sentences
+- **Paragraph Agnostic**: Works with any paragraph structure (handles legal PDFs with frequent line breaks)
+- **Continuous Context**: 2-sentence overlap preserves context between chunks
+- **No Information Loss**: Every sentence appears in at least one chunk
 
 ## Legal Header Preservation
 

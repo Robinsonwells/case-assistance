@@ -49,14 +49,16 @@ export default class DocumentChunker {
 
       console.log(`Processing ${paragraphs.length} paragraphs with sentence-based semantic boundaries`)
 
-      // Process each paragraph with buffering logic
+      // Accumulator-based approach: buffer sentences until we reach target size
+      let sentenceBuffer = []
       let paraIdx = 0
+      let chunkIndex = 0
+
       while (paraIdx < paragraphs.length) {
         const paragraph = paragraphs[paraIdx].trim()
 
         // Skip empty paragraphs
         if (paragraph.length === 0) {
-          console.warn(`Skipping empty paragraph at index ${paraIdx}`)
           paraIdx++
           continue
         }
@@ -65,102 +67,64 @@ export default class DocumentChunker {
         const sentences = this._extractSentences(paragraph)
 
         if (sentences.length === 0) {
-          console.warn(`No sentences extracted from paragraph ${paraIdx}, treating as single chunk`)
-          chunks.push({
-            id: `para_${paraIdx}_chunk_0`,
-            text: paragraph,
-            type: 'empty_sentence_fallback',
-            metadata: {
-              paragraph: paraIdx,
-              chunkIndex: 0,
-              sentenceStart: 0,
-              sentenceEnd: 0,
-              sentenceCount: 0,
-              isBuffered: false,
-              overlapWith: null
-            }
-          })
           paraIdx++
           continue
         }
 
-        // RULE 1: Small Paragraph (1-2 sentences) - Buffer and merge with next
-        if (sentences.length <= 2) {
-          console.log(`Small paragraph detected (${sentences.length} sentences) at index ${paraIdx}, buffering...`)
+        // Add sentences to buffer
+        sentenceBuffer.push(...sentences)
+        console.log(`Added ${sentences.length} sentences from para ${paraIdx}. Buffer: ${sentenceBuffer.length} sentences`)
 
-          // Check if there's a next paragraph to merge with
-          if (paraIdx + 1 < paragraphs.length) {
-            const nextParagraph = paragraphs[paraIdx + 1].trim()
-            const nextSentences = this._extractSentences(nextParagraph)
+        // When buffer reaches target size, create chunks with sliding window
+        while (sentenceBuffer.length >= sentenceWindowSize) {
+          // Take exactly sentenceWindowSize sentences for this chunk
+          const chunkSentences = sentenceBuffer.slice(0, sentenceWindowSize)
+          const chunkText = chunkSentences.join(' ').trim()
 
-            // Merge current and next paragraph sentences
-            const mergedSentences = [...sentences, ...nextSentences]
-            console.log(`  → Merging with next paragraph: ${sentences.length} + ${nextSentences.length} = ${mergedSentences.length} sentences`)
-
-            // Chunk the merged result with sliding window
-            const mergedChunks = this._chunkSlidingWindow(
-              mergedSentences,
-              paraIdx,
-              sentenceWindowSize,
-              sentenceOverlap,
-              true // isBuffered = true
-            )
-            chunks.push(...mergedChunks)
-
-            // Skip next paragraph since we merged it
-            paraIdx += 2
-          } else {
-            // Last paragraph is small - emit as single chunk
-            console.log(`  → Last paragraph is small, emitting as single chunk`)
-            chunks.push({
-              id: `para_${paraIdx}_chunk_0`,
-              text: sentences.join(' ').trim(),
-              type: 'small_paragraph_last',
-              metadata: {
-                paragraph: paraIdx,
-                chunkIndex: 0,
-                sentenceStart: 0,
-                sentenceEnd: sentences.length - 1,
-                sentenceCount: sentences.length,
-                isBuffered: false,
-                overlapWith: null
-              }
-            })
-            paraIdx++
-          }
-        }
-        // RULE 2: Just-Right Paragraph (3-5 sentences) - Keep as single chunk
-        else if (sentences.length >= 3 && sentences.length <= 5) {
-          console.log(`Just-right paragraph (${sentences.length} sentences) at index ${paraIdx}, keeping intact`)
           chunks.push({
-            id: `para_${paraIdx}_chunk_0`,
-            text: paragraph,
-            type: 'single_paragraph',
+            id: `chunk_${chunkIndex}`,
+            text: chunkText,
+            type: 'sliding_window',
             metadata: {
               paragraph: paraIdx,
-              chunkIndex: 0,
+              chunkIndex: chunkIndex,
               sentenceStart: 0,
-              sentenceEnd: sentences.length - 1,
-              sentenceCount: sentences.length,
-              isBuffered: false,
-              overlapWith: null
+              sentenceEnd: sentenceWindowSize - 1,
+              sentenceCount: sentenceWindowSize,
+              isBuffered: true,
+              overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
             }
           })
-          paraIdx++
+
+          console.log(`  → Created chunk ${chunkIndex} with ${sentenceWindowSize} sentences`)
+          chunkIndex++
+
+          // Slide the window: remove (windowSize - overlap) sentences
+          const slideAmount = sentenceWindowSize - sentenceOverlap
+          sentenceBuffer = sentenceBuffer.slice(slideAmount)
+          console.log(`  → Slid window by ${slideAmount}, buffer now has ${sentenceBuffer.length} sentences`)
         }
-        // RULE 3: Large Paragraph (6+ sentences) - Apply sliding window
-        else {
-          console.log(`Large paragraph (${sentences.length} sentences) at index ${paraIdx}, applying sliding window`)
-          const largeChunks = this._chunkSlidingWindow(
-            sentences,
-            paraIdx,
-            sentenceWindowSize,
-            sentenceOverlap,
-            false // isBuffered = false
-          )
-          chunks.push(...largeChunks)
-          paraIdx++
-        }
+
+        paraIdx++
+      }
+
+      // Flush remaining sentences in buffer as final chunk
+      if (sentenceBuffer.length > 0) {
+        console.log(`Flushing final ${sentenceBuffer.length} sentences from buffer`)
+        chunks.push({
+          id: `chunk_${chunkIndex}`,
+          text: sentenceBuffer.join(' ').trim(),
+          type: 'buffer_remainder',
+          metadata: {
+            paragraph: paraIdx - 1,
+            chunkIndex: chunkIndex,
+            sentenceStart: 0,
+            sentenceEnd: sentenceBuffer.length - 1,
+            sentenceCount: sentenceBuffer.length,
+            isBuffered: true,
+            overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
+          }
+        })
       }
 
       console.log(`Created ${chunks.length} chunks from ${paragraphs.length} paragraphs using semantic boundaries`)
