@@ -28,6 +28,7 @@ export default class DocumentChunker {
     ])
 
     // Patterns for incomplete sentence endings that should trigger validation failure
+    // Using \b for word boundaries to avoid partial matches
     this.incompletePhrases = [
       /\b(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,           // Ends with title
       /\b(Inc|Corp|Ltd|LLC)\.\s*$/i,            // Ends with corporate suffix
@@ -36,28 +37,18 @@ export default class DocumentChunker {
       /\b[A-Z]\.\s*$/,                           // Single initial "J."
       /\b[A-Z]\.\s+[A-Z]\.\s*$/,                // Double initial "J. K."
       /\sU\.\s*S\.\s*$/,                         // "U. S." at end
-      /\sF\.\s*$/,                               // Federal reporter citation incomplete
-      /\s3d\s*$/,                                // "F. 3d" incomplete
+      /\sF\.\s*3d\s*$/,                          // "F. 3d" incomplete
+      /\b3d\s*$/,                                // "3d" incomplete
       /\bNo\.\s*$/i,                             // "No." without number
+      /\bvs\.\s*$/i,                             // "vs." without party
       /\($/,                                      // Trailing open paren
       /\[$/,                                      // Trailing open bracket
       /,\s*$/,                                    // Trailing comma
       /;\s*$/,                                    // Trailing semicolon
       /:\s*$/,                                    // Trailing colon
-      /\band\s*$/i,                              // Ends with "and"
-      /\bor\s*$/i,                               // Ends with "or"
-      /\bthe\s*$/i,                              // Ends with "the"
-      /\ba\s*$/i,                                // Ends with "a"
-      /\ban\s*$/i,                               // Ends with "an"
-      /\bto\s*$/i,                               // Ends with "to"
-      /\bof\s*$/i,                               // Ends with "of"
-      /\bin\s*$/i,                               // Ends with "in"
-      /\bfor\s*$/i,                              // Ends with "for"
-      /\bwith\s*$/i,                             // Ends with "with"
-      /\bat\s*$/i,                               // Ends with "at"
-      /\bby\s*$/i,                               // Ends with "by"
-      /\bfrom\s*$/i,                             // Ends with "from"
-      /\bas\s*$/i                                // Ends with "as"
+      
+      // Prepositions/conjunctions at end of chunk (space required before)
+      /\s(?:and|or|the|a|an|to|of|in|for|with|at|by|from|as)\s*$/i,
     ]
   }
 
@@ -113,8 +104,6 @@ export default class DocumentChunker {
 
         // ORPHAN RESCUE: Check if this is a fragment that should be merged
         if (this._isFragmentParagraph(paragraph)) {
-          console.log(`  ⚠️  Fragment para ${paraIdx}: "${paragraph.substring(0, 50)}..."`)
-
           // Look ahead and merge with next paragraph(s) until we find a complete one
           let mergedText = paragraph
           let lookAhead = 1
@@ -132,7 +121,6 @@ export default class DocumentChunker {
 
             // If next paragraph is NOT a fragment, we're done merging
             if (!this._isFragmentParagraph(nextPara)) {
-              console.log(`  ✓ Merged with para ${paraIdx + lookAhead}`)
               break
             }
 
@@ -148,8 +136,6 @@ export default class DocumentChunker {
         const sentences = this._extractSentences(paragraph)
 
         if (sentences.length === 0) continue
-
-        console.log(`  Para ${paraIdx}: ${sentences.length} sentences`)
 
         // APPLY SLIDING WINDOW PER PARAGRAPH (not global buffer)
         for (let i = 0; i < sentences.length; i += step) {
@@ -176,7 +162,6 @@ export default class DocumentChunker {
               }
             })
 
-            console.log(`    → Chunk ${chunkIndex} (${chunkSentences.length} sentences)`)
             chunkIndex++
           }
 
@@ -627,26 +612,36 @@ export default class DocumentChunker {
 
     // CHECK INCOMPLETE ENDINGS: Detect chunks ending with incomplete phrases
     // Examples: "Dr." "Inc." "(Admin. R." "and" "to" etc.
+    let incompleteMatchStart = -1
+
     for (const pattern of this.incompletePhrases) {
-      if (pattern.test(chunkText)) {
-        console.warn(`⚠️  Chunk ends with incomplete phrase: "${chunkText.substring(Math.max(0, chunkText.length - 50))}..."`)
+      const match = chunkText.match(pattern)
+      if (match && match.index !== undefined) {
+        incompleteMatchStart = match.index
+        console.warn(`⚠️  Chunk ends with incomplete phrase: "${match[0]}"`)
+        break
+      }
+    }
 
-        // Try to find the previous complete sentence
-        const lastPeriodIdx = chunkText.lastIndexOf('.', chunkText.length - 2)
-        const lastExclamIdx = chunkText.lastIndexOf('!', chunkText.length - 2)
-        const lastQuestIdx = chunkText.lastIndexOf('?', chunkText.length - 2)
-        const prevSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+    if (incompleteMatchStart > 0) {
+      // Found where incomplete phrase starts
+      // Now trim to the last complete sentence BEFORE this position
+      const textBeforeIncomplete = chunkText.substring(0, incompleteMatchStart)
+      
+      // Find the last sentence-ending punctuation in the text before incomplete phrase
+      const lastPeriodIdx = textBeforeIncomplete.lastIndexOf('.')
+      const lastExclamIdx = textBeforeIncomplete.lastIndexOf('!')
+      const lastQuestIdx = textBeforeIncomplete.lastIndexOf('?')
+      const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
 
-        if (prevSentenceEnd > 0 && prevSentenceEnd > chunkText.length * 0.4) {
-          // Found a previous sentence - trim to that
-          chunkText = chunkText.substring(0, prevSentenceEnd + 1).trim()
-          console.log(`   ✓ Trimmed to previous complete sentence`)
-          break
-        } else {
-          // No previous complete sentence - discard chunk
-          console.error('   ✗ No complete sentence found. Discarding chunk.')
-          return ''
-        }
+      if (lastSentenceEnd > textBeforeIncomplete.length * 0.4) {
+        // Found a substantial previous sentence
+        chunkText = textBeforeIncomplete.substring(0, lastSentenceEnd + 1).trim()
+        console.log(`   ✓ Trimmed incomplete ending`)
+      } else {
+        // No good sentence before incomplete phrase - discard chunk
+        console.error('   ✗ Incomplete phrase too early in chunk. Discarding.')
+        return ''
       }
     }
 
