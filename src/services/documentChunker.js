@@ -4,11 +4,61 @@
  */
 export default class DocumentChunker {
   constructor() {
-    // Sentence regex pattern - matches sentences ending with . ! or ?
-    this.sentencePattern = /[^.!?]+[.!?]+/g
-
     // Pattern for spaced ellipses in legal documents (e.g., ". . ." or " . . . ")
     this.ellipsisPattern = /(\s*\.\s+){2,}/g
+
+    // Common abbreviations that end with periods but are NOT sentence endings
+    // These should never be treated as sentence boundaries
+    this.abbreviations = new Set([
+      // Titles and honorifics
+      'Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Rev', 'Hon', 'Sr', 'Jr', 'Esq',
+      // Academic degrees
+      'Ph.D', 'M.D', 'J.D', 'M.A', 'B.A', 'B.S', 'M.S', 'LL.B', 'LL.M',
+      // Business/corporate
+      'Inc', 'Corp', 'Ltd', 'LLC', 'Co', 'Assn', 'Bros',
+      // Legal citations and administrative
+      'Admin', 'R', 'U', 'S', 'C', 'F', 'Supp', 'Cal', 'App',
+      'P', 'A', 'N.Y', 'N.E', 'S.W', 'S.E', 'N.W', 'So',
+      // Months (abbreviated)
+      'Jan', 'Feb', 'Mar', 'Apr', 'Jun', 'Jul', 'Aug', 'Sep', 'Sept', 'Oct', 'Nov', 'Dec',
+      // Time and measurement
+      'a.m', 'p.m', 'etc', 'vs', 'v', 'e.g', 'i.e', 'et al', 'cf',
+      // Other common
+      'No', 'Vol', 'Ed', 'Dept', 'Div', 'St', 'Ave', 'Blvd', 'Rd'
+    ])
+
+    // Patterns for incomplete sentence endings that should trigger validation failure
+    this.incompletePhrases = [
+      /\b(Dr|Mr|Mrs|Ms|Prof)\.\s*$/i,           // Ends with title
+      /\b(Inc|Corp|Ltd|LLC)\.\s*$/i,            // Ends with corporate suffix
+      /\(Admin\.\s*R\.\s*$/i,                    // Incomplete citation "(Admin. R."
+      /\(Admin\.\s*R\.\s*at\s*$/i,              // Incomplete citation "(Admin. R. at"
+      /\b[A-Z]\.\s*$/,                           // Single initial "J."
+      /\b[A-Z]\.\s+[A-Z]\.\s*$/,                // Double initial "J. K."
+      /\sU\.\s*S\.\s*$/,                         // "U. S." at end
+      /\sF\.\s*$/,                               // Federal reporter citation incomplete
+      /\s3d\s*$/,                                // "F. 3d" incomplete
+      /\bNo\.\s*$/i,                             // "No." without number
+      /\($/,                                      // Trailing open paren
+      /\[$/,                                      // Trailing open bracket
+      /,\s*$/,                                    // Trailing comma
+      /;\s*$/,                                    // Trailing semicolon
+      /:\s*$/,                                    // Trailing colon
+      /\band\s*$/i,                              // Ends with "and"
+      /\bor\s*$/i,                               // Ends with "or"
+      /\bthe\s*$/i,                              // Ends with "the"
+      /\ba\s*$/i,                                // Ends with "a"
+      /\ban\s*$/i,                               // Ends with "an"
+      /\bto\s*$/i,                               // Ends with "to"
+      /\bof\s*$/i,                               // Ends with "of"
+      /\bin\s*$/i,                               // Ends with "in"
+      /\bfor\s*$/i,                              // Ends with "for"
+      /\bwith\s*$/i,                             // Ends with "with"
+      /\bat\s*$/i,                               // Ends with "at"
+      /\bby\s*$/i,                               // Ends with "by"
+      /\bfrom\s*$/i,                             // Ends with "from"
+      /\bas\s*$/i                                // Ends with "as"
+    ]
   }
 
   /**
@@ -196,8 +246,8 @@ export default class DocumentChunker {
   }
 
   /**
-   * Extract sentences from text using regex pattern
-   * Handles common edge cases
+   * Extract sentences from text using smart boundary detection
+   * Handles abbreviations, legal citations, and other non-sentence-ending periods
    *
    * @private
    * @param {string} text - Text to extract sentences from
@@ -214,22 +264,114 @@ export default class DocumentChunker {
       // Replace ". . ." or " . . . " with "..."
       let normalizedText = text.replace(this.ellipsisPattern, '...')
 
-      // Use regex to find sentences
-      const matches = normalizedText.match(this.sentencePattern)
+      // Smart sentence detection that avoids breaking at abbreviations
+      const sentences = []
+      let currentSentence = ''
+      let i = 0
 
-      if (!matches) {
-        // No sentence terminators found - return text as single sentence
-        return [normalizedText.trim()]
+      while (i < normalizedText.length) {
+        const char = normalizedText[i]
+        currentSentence += char
+
+        // Check if we hit a potential sentence ending (. ! ?)
+        if (char === '.' || char === '!' || char === '?') {
+          // Look ahead to see what's next
+          const nextChar = normalizedText[i + 1]
+          const nextNextChar = normalizedText[i + 2]
+
+          // Check if this is really a sentence boundary
+          if (this._isSentenceBoundary(currentSentence, nextChar, nextNextChar)) {
+            // This is a real sentence boundary
+            sentences.push(currentSentence.trim())
+            currentSentence = ''
+          }
+          // Otherwise, keep building the current sentence
+        }
+
+        i++
       }
 
-      // Clean up sentences - trim whitespace
-      return matches
-        .map(sentence => sentence.trim())
-        .filter(sentence => sentence.length > 0)
+      // Don't forget the last sentence if there's content
+      if (currentSentence.trim().length > 0) {
+        sentences.push(currentSentence.trim())
+      }
+
+      return sentences.filter(s => s.length > 0)
     } catch (err) {
       console.error('Error extracting sentences:', err)
       return [text] // Return original text as fallback
     }
+  }
+
+  /**
+   * Determine if a period is a true sentence boundary or just an abbreviation
+   *
+   * @private
+   * @param {string} textSoFar - Text accumulated up to and including the period
+   * @param {string} nextChar - The character immediately after the period
+   * @param {string} nextNextChar - The character two positions after the period
+   * @returns {boolean} - True if this is a sentence boundary, false if it's an abbreviation
+   */
+  _isSentenceBoundary(textSoFar, nextChar, nextNextChar) {
+    // Rule 1: If next char is undefined/end of text, it's a sentence boundary
+    if (!nextChar) {
+      return true
+    }
+
+    // Rule 2: If followed by closing punctuation and then uppercase, it's a boundary
+    // Example: "sentence." -> next sentence
+    // Example: "sentence.)" -> next sentence
+    // Example: "sentence.]" -> next sentence
+    if (/[)\]]/.test(nextChar) && /[A-Z]/.test(nextNextChar)) {
+      return true
+    }
+
+    // Rule 3: If not followed by space/newline, it's NOT a boundary
+    // Example: "example.com" or "3.14"
+    if (!/[\s\n]/.test(nextChar)) {
+      return false
+    }
+
+    // Rule 4: If followed by lowercase letter, it's NOT a boundary
+    // Example: "e.g. something" or "Dr. Smith"
+    if (/[a-z]/.test(nextChar)) {
+      return false
+    }
+
+    // Rule 5: Check if the text ends with a known abbreviation
+    const words = textSoFar.trim().split(/\s+/)
+    const lastWord = words[words.length - 1]
+
+    // Remove the trailing period to check abbreviation
+    const wordWithoutPeriod = lastWord.replace(/\.$/, '')
+
+    // Check common abbreviation patterns
+    if (this.abbreviations.has(wordWithoutPeriod)) {
+      // It's an abbreviation, but might still be end of sentence if followed by uppercase
+      return /[A-Z]/.test(nextChar)
+    }
+
+    // Rule 6: Single letter followed by period (initial) - NOT a boundary unless followed by uppercase
+    // Example: "J. Smith" vs "J. This is a new sentence"
+    if (/^[A-Z]$/.test(wordWithoutPeriod)) {
+      return /[A-Z]/.test(nextChar)
+    }
+
+    // Rule 7: Legal citation patterns like "Admin. R." or "U. S." - NOT boundaries
+    if (words.length >= 2) {
+      const lastTwo = words.slice(-2).join(' ')
+      if (/^(Admin|U|F)\.\s+[A-Z]\.?$/.test(lastTwo)) {
+        return false
+      }
+    }
+
+    // Rule 8: If followed by uppercase letter or digit, it's likely a sentence boundary
+    if (/[A-Z0-9]/.test(nextChar)) {
+      return true
+    }
+
+    // Default: If we get here and next char is whitespace, treat as boundary
+    return /[\s\n]/.test(nextChar)
   }
 
   /**
@@ -480,6 +622,31 @@ export default class DocumentChunker {
         // Otherwise, add a period (incomplete sentence, but salvageable)
         console.warn('   ⚠️  Adding period to incomplete sentence')
         chunkText = chunkText + '.'
+      }
+    }
+
+    // CHECK INCOMPLETE ENDINGS: Detect chunks ending with incomplete phrases
+    // Examples: "Dr." "Inc." "(Admin. R." "and" "to" etc.
+    for (const pattern of this.incompletePhrases) {
+      if (pattern.test(chunkText)) {
+        console.warn(`⚠️  Chunk ends with incomplete phrase: "${chunkText.substring(Math.max(0, chunkText.length - 50))}..."`)
+
+        // Try to find the previous complete sentence
+        const lastPeriodIdx = chunkText.lastIndexOf('.', chunkText.length - 2)
+        const lastExclamIdx = chunkText.lastIndexOf('!', chunkText.length - 2)
+        const lastQuestIdx = chunkText.lastIndexOf('?', chunkText.length - 2)
+        const prevSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+
+        if (prevSentenceEnd > 0 && prevSentenceEnd > chunkText.length * 0.4) {
+          // Found a previous sentence - trim to that
+          chunkText = chunkText.substring(0, prevSentenceEnd + 1).trim()
+          console.log(`   ✓ Trimmed to previous complete sentence`)
+          break
+        } else {
+          // No previous complete sentence - discard chunk
+          console.error('   ✗ No complete sentence found. Discarding chunk.')
+          return ''
+        }
       }
     }
 
@@ -774,6 +941,33 @@ export default class DocumentChunker {
           issue: 'TOO_SHORT',
           length: text.length,
           severity: 'MEDIUM'
+        })
+      }
+
+      // Issue 5: Ends with incomplete phrase (abbreviation, preposition, etc.)
+      if (text && text.length > 0) {
+        for (const pattern of this.incompletePhrases) {
+          if (pattern.test(text)) {
+            issues.push({
+              chunkId: chunk.id,
+              chunkIndex: idx,
+              issue: 'INCOMPLETE_ENDING',
+              text: text.substring(Math.max(0, text.length - 50)),
+              severity: 'CRITICAL'
+            })
+            break
+          }
+        }
+      }
+
+      // Issue 6: Starts with punctuation (fragment)
+      if (text && text.length > 0 && /^[.!?,;:\-]/.test(text[0])) {
+        issues.push({
+          chunkId: chunk.id,
+          chunkIndex: idx,
+          issue: 'STARTS_WITH_PUNCTUATION',
+          text: text.substring(0, 50),
+          severity: 'CRITICAL'
         })
       }
     })

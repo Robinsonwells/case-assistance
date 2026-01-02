@@ -55,6 +55,107 @@ Paragraph 3: [S16, S17, S18]
 - **Better Retrieval**: Queries match chunks with cohesive topics
 - **Validated Quality**: Every chunk guaranteed to be well-formed
 
+## Smart Sentence Boundary Detection
+
+**NEW:** The chunker uses intelligent sentence detection that recognizes abbreviations and legal citations to avoid creating incomplete chunks.
+
+### The Problem: Naive Period Detection
+
+Simple regex patterns treat every period as a sentence ending, creating broken chunks:
+
+**Naive Approach:**
+```javascript
+// BAD: Breaks at every period
+/[^.!?]+[.!?]+/g
+
+// Creates fragments:
+"Dr."
+"Smith worked at Lucent Technologies, Inc."
+"The company hired three different physicians––Dr."
+```
+
+These breaks violate completeness requirements.
+
+### The Solution: Context-Aware Sentence Detection
+
+The chunker analyzes **context** around periods to distinguish:
+- **Real sentence endings**: `"Smith worked at Lucent."`
+- **Abbreviations**: `"Dr. Smith"`, `"Inc."`, `"U. S. C."`
+- **Legal citations**: `"Admin. R. 005"`, `"F. 3d"`
+- **Initials**: `"J. K. Smith"`
+
+### Detection Rules
+
+The chunker applies these rules **in order** when evaluating a period:
+
+1. **End of text** → Sentence boundary
+2. **Followed by closing punctuation + uppercase** → Sentence boundary
+   - `"sentence.)" Next sentence"`
+3. **Not followed by space** → NOT a boundary
+   - `"example.com"`, `"3.14"`
+4. **Followed by lowercase** → NOT a boundary
+   - `"e.g. something"`, `"Dr. smith"`
+5. **Known abbreviation + uppercase next** → Boundary
+   - `"worked at Inc. The company"` (period ends sentence)
+6. **Known abbreviation + lowercase next** → NOT a boundary
+   - `"Dr. Smith"`, `"Inc. hired"`
+7. **Single letter + uppercase next** → Boundary
+   - `"J. The next sentence"`
+8. **Single letter + lowercase next** → NOT a boundary
+   - `"J. Smith"`
+9. **Legal citation pattern** → NOT a boundary
+   - `"Admin. R. 005"`, `"U. S. C."`
+10. **Followed by uppercase/digit** → Boundary
+
+### Abbreviation Database
+
+The chunker maintains a comprehensive list of 60+ common abbreviations:
+
+**Titles:** Dr, Mr, Mrs, Ms, Prof, Rev, Hon, Sr, Jr, Esq
+
+**Degrees:** Ph.D, M.D, J.D, M.A, B.A, B.S, M.S, LL.B, LL.M
+
+**Corporate:** Inc, Corp, Ltd, LLC, Co, Assn, Bros
+
+**Legal:** Admin, R, U, S, C, F, Supp, Cal, App, P, A, N.Y, N.E, S.W
+
+**Months:** Jan, Feb, Mar, Apr, Jun, Jul, Aug, Sep, Oct, Nov, Dec
+
+**Other:** a.m, p.m, etc, vs, v, e.g, i.e, et al, cf, No, Vol, Ed
+
+### Examples
+
+**Input text:**
+```
+Dr. Smith worked at Lucent Technologies, Inc. from 1998 to 2005. He filed
+a claim with Admin. R. 005. Three physicians––Dr. Holtzmeier, Dr. Seymour,
+and Dr. Weaver––evaluated his condition.
+```
+
+**Old approach (naive):**
+```
+Sentence 1: "Dr."
+Sentence 2: "Smith worked at Lucent Technologies, Inc."
+Sentence 3: "from 1998 to 2005."
+Sentence 4: "He filed a claim with Admin."
+Sentence 5: "R."
+... (broken fragments)
+```
+
+**New approach (smart):**
+```
+Sentence 1: "Dr. Smith worked at Lucent Technologies, Inc. from 1998 to 2005."
+Sentence 2: "He filed a claim with Admin. R. 005."
+Sentence 3: "Three physicians––Dr. Holtzmeier, Dr. Seymour, and Dr. Weaver––evaluated his condition."
+```
+
+### Benefits
+
+- **No abbreviation breaks**: `"Dr. Smith"` stays together
+- **Legal citations intact**: `"Admin. R. 005"` is one unit
+- **Corporate names complete**: `"Lucent Technologies, Inc."` in one sentence
+- **Better retrieval**: Queries for "Dr. Smith" match complete context
+
 ## Ellipsis Normalization
 
 **NEW:** The chunker automatically normalizes spaced ellipses before sentence extraction to prevent fragment chunks.
@@ -291,64 +392,125 @@ When validation fails:
 
 See `HEADER-PRESERVATION.md` for detailed examples and boundary validation logic.
 
-## Incomplete Sentence Detection
+## Incomplete Ending Validation
 
-**NEW:** The chunker automatically detects and removes incomplete sentences that end mid-word or with dangling prepositions.
+**NEW:** The chunker automatically detects and removes chunks ending with incomplete phrases, abbreviations, or dangling words.
 
-### What Are Incomplete Sentences?
+### What Are Incomplete Endings?
 
-Incomplete sentences are chunks that end with partial text caused by:
-- Sentence breaks that split in the middle of a thought
-- Sentences ending with prepositions followed by next sentence
-- Mid-word cuts like "involved Under" (should be "involved supporting...")
+Incomplete endings are chunks that end with partial text caused by:
+- **Abbreviations without continuation**: `"...hired Dr."` (missing name)
+- **Incomplete citations**: `"(Admin. R."` (missing document number)
+- **Dangling prepositions**: `"worked at"` (missing location)
+- **Dangling conjunctions**: `"Smith and"` (missing second name)
+- **Mid-word cuts**: `"involved Under"` (split between sentences)
 
-**Examples:**
+**Examples of Invalid Endings:**
 ```
-Bad: "His job was fast-paced and it involved Under the terms..."
-             ↑ Sentence ends with "involved" but continues with "Under"
-
-Good: "His job was fast-paced and it involved supporting employees."
-             ↑ Complete sentence with proper ending
+❌ "Three different physicians––Dr."
+❌ "He filed a claim (Admin. R."
+❌ "Plaintiff worked at"
+❌ "Smith and"
+❌ "Lucent Technologies, Inc."
+❌ "disability... from engaging in"
 ```
 
-### How Detection Works
+### Detection Criteria
 
-The chunker checks the last sentence in each chunk for incomplete patterns:
+The chunker checks chunks against **30+ incomplete phrase patterns**:
 
-**Detection Criteria:**
+**1. Abbreviations/Titles:**
+- Ends with: `Dr.`, `Mr.`, `Mrs.`, `Ms.`, `Prof.`
+- Example: `"Three physicians––Dr."`
+- Action: Trim to previous complete sentence
 
-1. **Ends with preposition** - sentence ends with: `in, of, to, and, or, with, from, at, by, as, because, that, which, who`
-   - Example: "...the employee was engaged in."
-   - Action: Remove last sentence
+**2. Corporate Suffixes:**
+- Ends with: `Inc.`, `Corp.`, `Ltd.`, `LLC.`
+- Example: `"worked at Lucent Technologies, Inc."`
+- Action: Trim to previous complete sentence
 
-2. **Lowercase to uppercase** - last 30 chars contain pattern `[a-z] [A-Z]`
-   - Example: "...it involved Under the terms"
-   - Action: Remove last sentence
+**3. Incomplete Citations:**
+- Ends with: `(Admin. R.`, `(Admin. R. at`, `U. S.`, `F.`
+- Example: `"filed claim (Admin. R."`
+- Action: Trim to previous complete sentence
 
-**Example Flow:**
+**4. Initials:**
+- Ends with: `J.`, `J. K.`
+- Example: `"Plaintiff J."`
+- Action: Trim to previous complete sentence
+
+**5. Trailing Punctuation:**
+- Ends with: `(`, `[`, `,`, `;`, `:`
+- Example: `"The Plan defined disability as (`
+- Action: Trim to previous complete sentence
+
+**6. Dangling Prepositions:**
+- Ends with: `to`, `of`, `in`, `for`, `with`, `at`, `by`, `from`, `as`
+- Example: `"Plaintiff worked at"`
+- Action: Trim to previous complete sentence
+
+**7. Dangling Conjunctions:**
+- Ends with: `and`, `or`, `the`, `a`, `an`
+- Example: `"Smith and"`
+- Action: Trim to previous complete sentence
+
+**8. Lowercase to Uppercase (Mid-sentence cuts):**
+- Pattern: `[a-z] [A-Z]` in last 30 characters
+- Example: `"...it involved Under the terms"`
+- Action: Remove last sentence
+
+**Example Flow 1: Abbreviation Detection**
 
 ```
-Original chunk: "His job required technical expertise. It was fast-paced and it involved Under the terms of the Plan..."
-
-Last sentence: "It was fast-paced and it involved Under the terms of the Plan..."
+Original chunk: "Plaintiff's medical evaluations were conducted by three physicians––Dr."
 
 Detection:
-- Check: Ends with preposition? No
-- Check: Contains "involved Under" (lowercase→uppercase)? YES ✓
+- Check incomplete phrases: Ends with "Dr." pattern? YES ✓
 
-Action: Remove last sentence
-Result: "His job required technical expertise."
+Action: Find previous complete sentence
+- Previous sentence: None found (chunk only has one sentence)
 
-Validation:
-- Length >= 80 chars? YES ✓
+Result: Discard entire chunk (no complete sentence exists)
+```
+
+**Example Flow 2: Incomplete Citation**
+
+```
+Original chunk: "The medical evidence is in the administrative record (Admin. R."
+
+Detection:
+- Check incomplete phrases: Ends with "(Admin. R." pattern? YES ✓
+
+Action: Find previous complete sentence
+- Previous sentence: None found
+
+Result: Discard entire chunk
+```
+
+**Example Flow 3: Successful Trimming**
+
+```
+Original chunk: "Plaintiff worked as a software engineer at Lucent Technologies. The position required concentration and sitting for extended periods. Three physicians––Dr."
+
+Detection:
+- Check incomplete phrases: Ends with "Dr." pattern? YES ✓
+
+Action: Find previous complete sentence
+- Previous sentence found at position 145: "...extended periods."
+
+Result: "Plaintiff worked as a software engineer at Lucent Technologies. The position required concentration and sitting for extended periods."
+- Length: 145 chars (>= 80) ✓
 - Keep chunk
 ```
 
 **Console Output:**
 
 ```
-⚠️  Last sentence looks incomplete: "It was fast-paced and it involved Under the ter..."
-   ✓ Removed incomplete sentence
+⚠️  Chunk ends with incomplete phrase: "...Three physicians––Dr."
+   ✓ Trimmed to previous complete sentence
+
+⚠️  Chunk ends with incomplete phrase: "...filed claim (Admin. R."
+   ✗ No complete sentence found. Discarding chunk.
 ```
 
 ### Minimum Chunk Size
@@ -454,9 +616,146 @@ Chunks are automatically:
 3. Stored with metadata intact
 4. Retrieved using hybrid search in RAG queries
 
+## Chunking Rules Summary
+
+Here's a comprehensive summary of all chunking rules that prevent periods from being treated as sentence endings incorrectly:
+
+### Pre-Processing Rules
+
+**1. Ellipsis Normalization (First Pass)**
+- Pattern: `(\s*\.\s+){2,}/g`
+- Action: Convert `". . ."` → `"..."`
+- Prevents: Spaced ellipses creating sentence fragments
+
+**2. Legal Header Stripping**
+- Patterns: Case numbers, page numbers, court identifiers, dates
+- Action: Remove entirely before sentence extraction
+- Prevents: Headers interrupting sentences
+
+**3. Fragment Detection & Merging**
+- Patterns: Short paragraphs (<80 chars), starts with lowercase/punctuation
+- Action: Merge with adjacent paragraphs
+- Prevents: Incomplete paragraph fragments
+
+### Sentence Extraction Rules
+
+**4. Smart Boundary Detection (Core Logic)**
+
+When encountering a period, check these rules in order:
+
+| Rule | Condition | Decision | Example |
+|------|-----------|----------|---------|
+| 1 | End of text | BOUNDARY | `"sentence."` (EOF) |
+| 2 | Followed by `)` or `]` + uppercase | BOUNDARY | `"sentence.)" Next` |
+| 3 | Not followed by space | NOT BOUNDARY | `"3.14"`, `"example.com"` |
+| 4 | Followed by lowercase | NOT BOUNDARY | `"e.g. something"` |
+| 5 | Known abbreviation + uppercase | BOUNDARY | `"Inc. The next"` |
+| 6 | Known abbreviation + lowercase | NOT BOUNDARY | `"Dr. Smith"` |
+| 7 | Single letter + uppercase | BOUNDARY | `"J. Next sentence"` |
+| 8 | Single letter + lowercase | NOT BOUNDARY | `"J. Smith"` |
+| 9 | Legal citation pattern | NOT BOUNDARY | `"Admin. R. 005"` |
+| 10 | Followed by uppercase/digit | BOUNDARY | `"sentence. Next"` |
+
+**5. Abbreviation Database (60+ entries)**
+- Titles: Dr, Mr, Mrs, Ms, Prof, Rev, Hon, Sr, Jr, Esq
+- Degrees: Ph.D, M.D, J.D, M.A, B.A, B.S, M.S, LL.B, LL.M
+- Corporate: Inc, Corp, Ltd, LLC, Co, Assn, Bros
+- Legal: Admin, R, U, S, C, F, Supp, Cal, App
+- Other: a.m, p.m, etc, vs, v, e.g, i.e, No, Vol
+
+### Post-Processing Rules
+
+**6. Incomplete Ending Validation (30+ patterns)**
+
+After sentence extraction, check if chunk ends with:
+
+| Pattern Type | Examples | Action |
+|-------------|----------|--------|
+| Abbreviations | `Dr.`, `Mr.`, `Ms.` | Trim to previous sentence |
+| Corporate | `Inc.`, `Corp.`, `Ltd.` | Trim to previous sentence |
+| Citations | `(Admin. R.`, `U. S.` | Trim to previous sentence |
+| Initials | `J.`, `J. K.` | Trim to previous sentence |
+| Punctuation | `(`, `[`, `,`, `;`, `:` | Trim to previous sentence |
+| Prepositions | `to`, `of`, `in`, `at`, `by` | Trim to previous sentence |
+| Conjunctions | `and`, `or`, `the`, `a` | Trim to previous sentence |
+| Mid-cuts | `[a-z] [A-Z]` | Remove last sentence |
+
+**7. Boundary Validation**
+
+Every chunk MUST satisfy:
+- ✓ Starts with uppercase letter or digit
+- ✓ Ends with `.`, `!`, or `?`
+- ✓ Minimum 80 characters
+- ✗ NEVER starts with lowercase or punctuation
+- ✗ NEVER ends with incomplete phrase
+
+**8. Discard Criteria**
+
+Chunks are discarded if:
+- Cannot find valid sentence start
+- Cannot find complete sentence ending
+- Too small after fixes (< 80 chars)
+- Contains only incomplete phrases
+
+### Processing Pipeline
+
+```
+1. Raw PDF Text
+   ↓
+2. Ellipsis Normalization (". . ." → "...")
+   ↓
+3. Header Stripping (Remove case numbers, page numbers)
+   ↓
+4. Paragraph Splitting (Double newlines)
+   ↓
+5. Fragment Detection & Merging
+   ↓
+6. Smart Sentence Extraction (10 context-aware rules)
+   ↓
+7. Sliding Window Chunking (8 sentences, 2 overlap)
+   ↓
+8. Incomplete Ending Check (30+ patterns)
+   ↓
+9. Boundary Validation (Start/end checks)
+   ↓
+10. Minimum Size Filter (>= 80 chars)
+   ↓
+11. Final Clean Chunks ✓
+```
+
+### What This Prevents
+
+❌ **Chunks ending with abbreviations:**
+```
+Bad: "Three physicians––Dr."
+Good: "Three physicians––Dr. Smith, Dr. Jones, and Dr. Brown––evaluated him."
+```
+
+❌ **Chunks ending with incomplete citations:**
+```
+Bad: "The record shows (Admin. R."
+Good: "The record shows Admin. R. 005 contains medical evaluations."
+```
+
+❌ **Chunks with dangling prepositions:**
+```
+Bad: "Plaintiff worked at"
+Good: "Plaintiff worked at Lucent Technologies from 1998 to 2005."
+```
+
+❌ **Chunks with corporate name fragments:**
+```
+Bad: "employed by Lucent Technologies, Inc."
+Good: "Plaintiff was employed by Lucent Technologies, Inc. as a software engineer."
+```
+
 ## Benefits
 
 ✅ **No mid-sentence cuts** - All chunks end on natural sentence boundaries
+
+✅ **No abbreviation breaks** - `"Dr. Smith"` stays together
+
+✅ **Complete citations** - `"Admin. R. 005"` is intact
 
 ✅ **Preserves semantic context** - Headers merged with content, not isolated
 
@@ -465,6 +764,8 @@ Chunks are automatically:
 ✅ **Maintains context** - Overlapping windows for large paragraphs
 
 ✅ **Optimal for legal docs** - Handles headers, analysis, and dense sections intelligently
+
+✅ **Automatic validation** - Every chunk guaranteed to be well-formed
 
 ## Validation
 
