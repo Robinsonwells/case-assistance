@@ -2,7 +2,7 @@
 
 ## Overview
 
-The DocumentChunker now uses **sentence-based chunking with semantic paragraph boundaries**. This ensures chunks never cut mid-sentence and intelligently handles different paragraph sizes.
+The DocumentChunker uses **sentence-based chunking with semantic paragraph boundaries** and **legal header preservation**. This ensures chunks never cut mid-sentence, intelligently handle different paragraph sizes, and preserve critical document metadata.
 
 ## Chunking Rules
 
@@ -48,6 +48,52 @@ S1. S2. S3. S4. S5. S6. S7. S8. S9. S10.
 Chunk 1: [S1, S2, S3, S4, S5, S6]
 Chunk 2: [S5, S6, S7, S8, S9, S10]  ← Overlaps with S5, S6
 ```
+
+## Legal Header Preservation
+
+**NEW:** Document headers (case numbers, page numbers, court identifiers) are now preserved as compact context prefixes.
+
+### How It Works
+
+Headers like:
+```
+No. 12-3834
+Page 3
+```
+
+Are automatically detected and attached to the following content:
+```
+[No. 12-3834 | Page 3] Plaintiff's job as a software engineer...
+```
+
+### Recognized Header Types
+
+- Case numbers: `No. 12-3834`, `Case No. 2023-1234`
+- Page numbers: `Page 3`, `Page 12 of 45`
+- Court identifiers: `UNITED STATES COURT OF APPEALS`
+- Case names: `Smith v. Jones`
+- Date stamps: `Filed: January 1, 2023`
+- Section headers: `BACKGROUND`, `OPINION` (all-caps)
+
+### Extracting Metadata
+
+Use the `extractMetadata()` helper to separate headers from content:
+
+```javascript
+const { metadata, content } = chunker.extractMetadata(chunk.text)
+
+// metadata: "No. 12-3834 | Page 3" (or null if no header)
+// content: "Plaintiff's job as a software engineer..."
+// full: original text with header prefix
+```
+
+### Benefits
+
+- **Traceability**: Every chunk knows its source case and page
+- **Better Search**: Headers provide additional context for semantic search
+- **No Loss**: All document metadata preserved in compact format
+
+See `HEADER-PRESERVATION.md` for detailed examples and implementation details.
 
 ## Usage
 

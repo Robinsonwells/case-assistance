@@ -38,14 +38,14 @@ export default class DocumentChunker {
         return chunks
       }
 
-      // Clean up text - trim and handle extra whitespace
-      const cleanText = text.trim()
-      if (cleanText.length === 0) {
+      // Attach headers to content as context prefixes
+      const processedText = this._attachHeadersToContent(text.trim())
+      if (processedText.length === 0) {
         return chunks
       }
 
       // Split into paragraphs by double newlines
-      const paragraphs = cleanText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
+      const paragraphs = processedText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
 
       console.log(`Processing ${paragraphs.length} paragraphs with sentence-based semantic boundaries`)
 
@@ -291,7 +291,7 @@ export default class DocumentChunker {
   /**
    * Extract sentences from text using regex pattern
    * Handles common edge cases
-   * 
+   *
    * @private
    * @param {string} text - Text to extract sentences from
    * @returns {array} - Array of sentences (strings)
@@ -317,6 +317,141 @@ export default class DocumentChunker {
     } catch (err) {
       console.error('Error extracting sentences:', err)
       return [text] // Return original text as fallback
+    }
+  }
+
+  /**
+   * Attach legal document headers to following content as context prefixes
+   *
+   * Headers like case numbers, page numbers, and document metadata are preserved
+   * by prepending them to the content that follows as compact prefixes.
+   *
+   * Example transformation:
+   *   Before: "No. 12-3834\nPage 3\nPlaintiff's job required..."
+   *   After: "[No. 12-3834 | Page 3] Plaintiff's job required..."
+   *
+   * @private
+   * @param {string} text - Raw document text
+   * @returns {string} - Text with headers attached as context prefixes
+   */
+  _attachHeadersToContent(text) {
+    if (!text || text.length === 0) {
+      return ''
+    }
+
+    const lines = text.split('\n')
+    const result = []
+    let currentHeader = []
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const trimmed = line.trim()
+
+      if (trimmed.length === 0) {
+        result.push(line)
+        continue
+      }
+
+      const isHeader = this._isLegalHeader(trimmed)
+
+      if (isHeader) {
+        currentHeader.push(trimmed)
+      } else {
+        if (currentHeader.length > 0) {
+          const headerPrefix = `[${currentHeader.join(' | ')}] `
+          result.push(headerPrefix + line)
+          currentHeader = []
+        } else {
+          result.push(line)
+        }
+      }
+    }
+
+    if (currentHeader.length > 0) {
+      result.push(`[${currentHeader.join(' | ')}]`)
+    }
+
+    return result.join('\n')
+  }
+
+  /**
+   * Determine if a line is a legal document header/metadata
+   *
+   * Recognizes common patterns:
+   * - Case numbers (e.g., "No. 12-3834", "Case No. 2023-1234")
+   * - Page numbers (e.g., "Page 3", "Page 12 of 45")
+   * - Court identifiers (e.g., "UNITED STATES COURT OF APPEALS")
+   * - Case names (e.g., "Smith v. Jones")
+   * - Date stamps (e.g., "Filed: January 1, 2023")
+   *
+   * @private
+   * @param {string} line - Trimmed line to check
+   * @returns {boolean} - True if line appears to be a header
+   */
+  _isLegalHeader(line) {
+    if (!line || line.length === 0) {
+      return false
+    }
+
+    const headerPatterns = [
+      /^No\.\s+\d{2,4}-\d{2,4}$/i,
+      /^Case\s+No\.\s+[\d-]+$/i,
+      /^Page\s+\d+(\s+of\s+\d+)?$/i,
+      /^\d+$/,
+      /^[A-Z\s]+COURT[A-Z\s]*$/,
+      /^UNITED STATES/i,
+      /^IN THE [A-Z\s]+ COURT/i,
+      /^Filed:\s+/i,
+      /^Decided:\s+/i,
+      /^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/,
+      /^[A-Z][a-z]+\s+v\.\s+[A-Z][a-z]+.*Plan$/,
+      /^\d{2,4}-\d{2,4}$/
+    ]
+
+    for (const pattern of headerPatterns) {
+      if (pattern.test(line)) {
+        return true
+      }
+    }
+
+    if (line.length < 100 && line === line.toUpperCase() && /^[A-Z\s.,'-]+$/.test(line)) {
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Extract metadata prefix from chunk text
+   *
+   * If the chunk starts with a header prefix like "[No. 12-3834 | Page 3]",
+   * this extracts it and returns both the metadata and clean content.
+   *
+   * @param {string} text - Chunk text that may contain metadata prefix
+   * @returns {object} - {metadata: string|null, content: string, full: string}
+   */
+  extractMetadata(text) {
+    if (!text || typeof text !== 'string') {
+      return { metadata: null, content: text || '', full: text || '' }
+    }
+
+    const metadataMatch = text.match(/^\[(.*?)\]\s+/)
+
+    if (metadataMatch) {
+      const metadata = metadataMatch[1]
+      const content = text.replace(/^\[.*?\]\s+/, '')
+
+      return {
+        metadata: metadata,
+        content: content,
+        full: text
+      }
+    }
+
+    return {
+      metadata: null,
+      content: text,
+      full: text
     }
   }
 
