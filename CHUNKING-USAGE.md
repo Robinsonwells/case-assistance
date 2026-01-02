@@ -55,6 +55,60 @@ Paragraph 3: [S16, S17, S18]
 - **Better Retrieval**: Queries match chunks with cohesive topics
 - **Validated Quality**: Every chunk guaranteed to be well-formed
 
+## Ellipsis Normalization
+
+**NEW:** The chunker automatically normalizes spaced ellipses before sentence extraction to prevent fragment chunks.
+
+### The Problem
+
+Legal documents commonly use spaced periods for ellipses:
+```
+"disability . . . from engaging in his occupation"
+```
+
+The sentence extraction regex treats each `. ` as a sentence ending, creating invalid fragments:
+```
+Fragment 1: "disability . "
+Fragment 2: ". "
+Fragment 3: ". from engaging in his occupation"
+```
+
+These fragments violate boundary rules (starting with periods or lowercase).
+
+### The Solution
+
+**Before sentence extraction**, the chunker normalizes all spaced ellipses:
+
+```javascript
+// Input text
+"disability . . . from engaging in his occupation"
+
+// Normalization: ". . ." → "..."
+"disability... from engaging in his occupation"
+
+// Now sentence extraction works correctly
+["disability... from engaging in his occupation."]
+```
+
+**Pattern:** Matches 2 or more occurrences of `". "` or ` . `:
+```regex
+/(\s*\.\s+){2,}/g
+```
+
+**Examples:**
+```
+". . ." → "..."
+" . . . " → "..."
+". . . . ." → "..."
+```
+
+### Benefits
+
+- **No fragments**: Ellipses never create sentence boundaries
+- **Clean chunks**: All chunks start with uppercase/digit, end with punctuation
+- **Automatic**: Works transparently during sentence extraction
+- **Preserves meaning**: "disability..." still conveys omission
+
 ## Orphan Rescue: Fragment Detection and Merging
 
 **NEW:** The chunker automatically detects and merges paragraph fragments to prevent incomplete chunks.
@@ -174,30 +228,58 @@ Patterns match headers:
 
 ### Automatic Boundary Validation
 
-After stripping, every chunk is validated:
+After stripping, every chunk is validated with **strict boundary rules**:
 
 **Requirements:**
-1. ✓ Starts with **uppercase letter or digit**
+1. ✓ Starts with **uppercase letter or digit** (NEVER lowercase or punctuation)
 2. ✓ Ends with **. ! or ?**
 3. ✓ No embedded headers
-4. ✓ Adequate length (>50 chars)
+4. ✓ Minimum length (≥80 chars)
+5. ✓ No incomplete sentences (no dangling prepositions or mid-word cuts)
 
 **Auto-Fix:**
-- If chunk starts with lowercase → rewind to last sentence boundary
+- If chunk starts with lowercase/punctuation → find first valid sentence start
 - If chunk ends without punctuation → trim to last sentence
 - If trailing headers detected → strip and re-validate
+- If last sentence incomplete → remove and validate remaining text
+- If chunk too small after fixes → discard entirely
+
+**Invalid Start Characters:**
+```
+Lowercase: a-z
+Punctuation: . ! ? , ; : -
+```
+
+**Valid Start Characters:**
+```
+Uppercase: A-Z
+Digits: 0-9
+```
 
 **Console Output:**
+
+When ellipses are normalized:
+```
+Processing 143 paragraphs with per-paragraph sliding windows
+  Para 5: 3 sentences (normalized ellipses)
+```
+
+When fragments are detected:
+```
+⚠️  Chunk starts with invalid '.': ". from engaging in his occupation..."
+   ✓ Trimmed to first valid sentence start
+```
+
+When validation passes:
 ```
 Chunk Validation Report: 0 issues found in 42 chunks (0 critical, 0 high, 0 medium)
 ✓ All chunks passed validation
 ```
 
-Or if issues found:
+When validation fails:
 ```
-⚠️  Chunk quality issues detected:
-  - CRITICAL: STARTS_WITH_LOWERCASE in chunk 12
-    "supporting employees and consultants..."
+⚠️  Chunk starts with invalid '.': ". from engaging in..."
+   ✗ No valid sentence boundary found. Discarding chunk.
 ```
 
 ### Benefits

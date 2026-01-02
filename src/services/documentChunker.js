@@ -6,6 +6,9 @@ export default class DocumentChunker {
   constructor() {
     // Sentence regex pattern - matches sentences ending with . ! or ?
     this.sentencePattern = /[^.!?]+[.!?]+/g
+
+    // Pattern for spaced ellipses in legal documents (e.g., ". . ." or " . . . ")
+    this.ellipsisPattern = /(\s*\.\s+){2,}/g
   }
 
   /**
@@ -206,12 +209,17 @@ export default class DocumentChunker {
         return []
       }
 
+      // CRITICAL: Normalize spaced ellipses before sentence extraction
+      // Legal documents use ". . ." which breaks sentence detection
+      // Replace ". . ." or " . . . " with "..."
+      let normalizedText = text.replace(this.ellipsisPattern, '...')
+
       // Use regex to find sentences
-      const matches = text.match(this.sentencePattern)
+      const matches = normalizedText.match(this.sentencePattern)
 
       if (!matches) {
         // No sentence terminators found - return text as single sentence
-        return [text.trim()]
+        return [normalizedText.trim()]
       }
 
       // Clean up sentences - trim whitespace
@@ -427,28 +435,28 @@ export default class DocumentChunker {
     // Trim whitespace
     chunkText = chunkText.trim()
 
-    // CHECK START: Chunk should start with uppercase letter or digit
+    // CHECK START: Chunk should start with uppercase letter or digit (never lowercase or punctuation)
     const firstChar = chunkText[0]
-    if (!isFirstChunk && /^[a-z]/.test(firstChar)) {
-      // PROBLEM: Chunk starts with lowercase - this is a mid-sentence cut
+    const startsInvalid = /^[a-z.!?,;:\-]/.test(firstChar)
+
+    if (!isFirstChunk && startsInvalid) {
+      // PROBLEM: Chunk starts with invalid character - this is a fragment
       console.warn(
-        `⚠️  Chunk starts with lowercase '${firstChar}': "${chunkText.substring(0, 50)}..."`
+        `⚠️  Chunk starts with invalid '${firstChar}': "${chunkText.substring(0, 50)}..."`
       )
 
-      // Find the last sentence-ending punctuation before this point
-      const lastPeriodIdx = chunkText.lastIndexOf('.')
-      const lastExclamIdx = chunkText.lastIndexOf('!')
-      const lastQuestIdx = chunkText.lastIndexOf('?')
-      const lastSentenceEnd = Math.max(lastPeriodIdx, lastExclamIdx, lastQuestIdx)
+      // Try to find the first valid sentence start (uppercase letter or digit after punctuation)
+      const firstValidMatch = chunkText.match(/[.!?]\s+([A-Z0-9])/);
 
-      if (lastSentenceEnd > 0) {
-        // Rewind: keep only complete sentences
-        chunkText = chunkText.substring(0, lastSentenceEnd + 1).trim()
-        console.log(`   ✓ Rewound to last sentence boundary`)
+      if (firstValidMatch && firstValidMatch.index !== undefined) {
+        // Found a valid sentence start - trim everything before it
+        const validStartIdx = firstValidMatch.index + firstValidMatch[0].length - 1;
+        chunkText = chunkText.substring(validStartIdx).trim();
+        console.log(`   ✓ Trimmed to first valid sentence start`);
       } else {
-        // No sentence boundary found - this chunk is corrupt
-        console.error('   ✗ No sentence boundary found. Discarding chunk.')
-        return ''
+        // No valid sentence start found - this chunk is corrupt
+        console.error('   ✗ No valid sentence boundary found. Discarding chunk.');
+        return '';
       }
     }
 
