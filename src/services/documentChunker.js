@@ -47,25 +47,20 @@ export default class DocumentChunker {
       // STEP 2: Split into paragraphs by double newlines
       const paragraphs = cleanedText.split(/\n\s*\n+/).filter(p => p.trim().length > 0)
 
-      console.log(`Processing ${paragraphs.length} paragraphs with sentence-based semantic boundaries`)
+      console.log(`Processing ${paragraphs.length} paragraphs with per-paragraph sliding windows`)
 
-      // Accumulator-based approach: buffer sentences until we reach target size
-      let sentenceBuffer = []
-      let paraIdx = 0
       let chunkIndex = 0
+      const step = sentenceWindowSize - sentenceOverlap
 
-      while (paraIdx < paragraphs.length) {
-        const paragraph = paragraphs[paraIdx].trim()
+      for (let paraIdx = 0; paraIdx < paragraphs.length; paraIdx++) {
+        let paragraph = paragraphs[paraIdx].trim()
 
         // Skip empty paragraphs
-        if (paragraph.length === 0) {
-          paraIdx++
-          continue
-        }
+        if (paragraph.length === 0) continue
 
         // ORPHAN RESCUE: Check if this is a fragment that should be merged
         if (this._isFragmentParagraph(paragraph)) {
-          console.log(`  ⚠️  Detected fragment para ${paraIdx}: "${paragraph.substring(0, 60)}..."`)
+          console.log(`  ⚠️  Fragment para ${paraIdx}: "${paragraph.substring(0, 50)}..."`)
 
           // Look ahead and merge with next paragraph(s) until we find a complete one
           let mergedText = paragraph
@@ -84,42 +79,29 @@ export default class DocumentChunker {
 
             // If next paragraph is NOT a fragment, we're done merging
             if (!this._isFragmentParagraph(nextPara)) {
-              console.log(`  ✓ Merged fragment with para ${paraIdx + lookAhead}`)
+              console.log(`  ✓ Merged with para ${paraIdx + lookAhead}`)
               break
             }
 
             lookAhead++
           }
 
-          // Extract sentences from merged text
-          const sentences = this._extractSentences(mergedText)
-
-          if (sentences.length > 0) {
-            sentenceBuffer.push(...sentences)
-            console.log(`Added ${sentences.length} sentences from merged fragment. Buffer: ${sentenceBuffer.length} sentences`)
-          }
-
-          // Skip all paragraphs we merged
-          paraIdx += (lookAhead + 1)
-          continue
+          // Skip all merged paragraphs
+          paraIdx += (lookAhead - 1)
+          paragraph = mergedText
         }
 
         // Extract sentences from current paragraph
         const sentences = this._extractSentences(paragraph)
 
-        if (sentences.length === 0) {
-          paraIdx++
-          continue
-        }
+        if (sentences.length === 0) continue
 
-        // Add sentences to buffer
-        sentenceBuffer.push(...sentences)
-        console.log(`Added ${sentences.length} sentences from para ${paraIdx}. Buffer: ${sentenceBuffer.length} sentences`)
+        console.log(`  Para ${paraIdx}: ${sentences.length} sentences`)
 
-        // When buffer reaches target size, create chunks with sliding window
-        while (sentenceBuffer.length >= sentenceWindowSize) {
-          // Take exactly sentenceWindowSize sentences for this chunk
-          const chunkSentences = sentenceBuffer.slice(0, sentenceWindowSize)
+        // APPLY SLIDING WINDOW PER PARAGRAPH (not global buffer)
+        for (let i = 0; i < sentences.length; i += step) {
+          const endIdx = Math.min(i + sentenceWindowSize, sentences.length)
+          const chunkSentences = sentences.slice(i, endIdx)
           let chunkText = chunkSentences.join(' ').trim()
 
           // CRITICAL: Validate and fix sentence boundaries
@@ -130,128 +112,32 @@ export default class DocumentChunker {
             chunks.push({
               id: `chunk_${chunkIndex}`,
               text: chunkText,
-              type: 'sliding_window',
+              type: 'paragraph_chunk',
               metadata: {
                 paragraph: paraIdx,
                 chunkIndex: chunkIndex,
-                sentenceStart: 0,
-                sentenceEnd: sentenceWindowSize - 1,
-                sentenceCount: sentenceWindowSize,
-                isBuffered: true,
-                overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
+                sentenceStart: i,
+                sentenceEnd: endIdx - 1,
+                sentenceCount: chunkSentences.length,
+                overlapWith: i > 0 ? `chunk_${chunkIndex - 1}` : null
               }
             })
 
-            console.log(`  → Created chunk ${chunkIndex} with ${sentenceWindowSize} sentences`)
+            console.log(`    → Chunk ${chunkIndex} (${chunkSentences.length} sentences)`)
             chunkIndex++
           }
 
-          // Slide the window: remove (windowSize - overlap) sentences
-          const slideAmount = sentenceWindowSize - sentenceOverlap
-          sentenceBuffer = sentenceBuffer.slice(slideAmount)
-          console.log(`  → Slid window by ${slideAmount}, buffer now has ${sentenceBuffer.length} sentences`)
-        }
-
-        paraIdx++
-      }
-
-      // Flush remaining sentences in buffer as final chunk
-      if (sentenceBuffer.length > 0) {
-        console.log(`Flushing final ${sentenceBuffer.length} sentences from buffer`)
-        let finalChunkText = sentenceBuffer.join(' ').trim()
-
-        // Validate and fix sentence boundaries
-        finalChunkText = this._fixSentenceBoundaries(finalChunkText, chunkIndex === 0)
-
-        if (finalChunkText.length > 0) {
-          chunks.push({
-            id: `chunk_${chunkIndex}`,
-            text: finalChunkText,
-            type: 'buffer_remainder',
-            metadata: {
-              paragraph: paraIdx - 1,
-              chunkIndex: chunkIndex,
-              sentenceStart: 0,
-              sentenceEnd: sentenceBuffer.length - 1,
-              sentenceCount: sentenceBuffer.length,
-              isBuffered: true,
-              overlapWith: chunkIndex > 0 ? `chunk_${chunkIndex - 1}` : null
-            }
-          })
+          // If we've reached the end of sentences, break
+          if (endIdx >= sentences.length) break
         }
       }
 
-      console.log(`Created ${chunks.length} chunks from ${paragraphs.length} paragraphs using semantic boundaries`)
+      console.log(`✓ Created ${chunks.length} chunks from ${paragraphs.length} paragraphs`)
       return chunks
     } catch (err) {
       console.error('Error in chunkHybrid:', err)
       return []
     }
-  }
-
-  /**
-   * Apply sliding window chunking to a list of sentences
-   *
-   * Creates overlapping chunks to preserve context between boundaries.
-   * For example, with windowSize=6 and overlap=2:
-   * - Chunk 1: sentences[0:6]
-   * - Chunk 2: sentences[4:10] (overlaps with 2 sentences from Chunk 1)
-   * - Chunk 3: sentences[8:14]
-   *
-   * @private
-   * @param {array} sentences - Array of sentence strings
-   * @param {number} paraIdx - Paragraph index for metadata
-   * @param {number} windowSize - Number of sentences per chunk (default: 6)
-   * @param {number} overlap - Number of overlapping sentences (default: 2)
-   * @param {boolean} isBuffered - Whether this is from a merged small paragraph (default: false)
-   * @returns {array} - Array of chunk objects
-   */
-  _chunkSlidingWindow(sentences, paraIdx, windowSize = 6, overlap = 2, isBuffered = false) {
-    const chunks = []
-    let step = windowSize - overlap
-
-    // Validate step is positive
-    if (step <= 0) {
-      console.error(`Invalid window configuration: windowSize=${windowSize}, overlap=${overlap}. Step must be positive.`)
-      // Fallback: use no overlap
-      overlap = 0
-      step = windowSize
-    }
-
-    let chunkIdx = 0
-    for (let i = 0; i < sentences.length; i += step) {
-      const endIdx = Math.min(i + windowSize, sentences.length)
-      const chunkSentences = sentences.slice(i, endIdx)
-      const chunkText = chunkSentences.join(' ').trim()
-
-      // Determine if this chunk overlaps with previous
-      const overlapWith = i > 0 ? `para_${paraIdx}_chunk_${chunkIdx - 1}` : null
-
-      chunks.push({
-        id: `para_${paraIdx}_chunk_${chunkIdx}`,
-        text: chunkText,
-        type: isBuffered ? 'merged_small_paragraphs' : 'paragraph_chunk',
-        metadata: {
-          paragraph: paraIdx,
-          chunkIndex: chunkIdx,
-          sentenceStart: i,
-          sentenceEnd: endIdx - 1,
-          sentenceCount: chunkSentences.length,
-          isBuffered: isBuffered,
-          overlapWith: overlapWith
-        }
-      })
-
-      chunkIdx++
-
-      // Stop if we've reached the end
-      if (endIdx >= sentences.length) {
-        break
-      }
-    }
-
-    console.log(`  → Created ${chunks.length} chunks from ${sentences.length} sentences (window=${windowSize}, overlap=${overlap})`)
-    return chunks
   }
 
   /**
@@ -589,6 +475,31 @@ export default class DocumentChunker {
       }
     }
 
+    // CHECK: Detect incomplete sentence patterns
+    // Pattern: "...fast-paced and it involved Under the terms" (lowercase to uppercase = sentence break)
+    const sentences = chunkText.match(/[^.!?]+[.!?]/g) || []
+
+    if (sentences.length > 1) {
+      const lastSentence = sentences[sentences.length - 1].trim()
+
+      // Check if last sentence has incomplete structure
+      // E.g., ends with preposition or ends with lowercase followed by uppercase
+      if (
+        /\s(in|of|to|and|or|with|from|at|by|as|because|that|which|who)\s*[.!?]$/.test(lastSentence) ||
+        /[a-z]\s+[A-Z]/.test(lastSentence.substring(Math.max(0, lastSentence.length - 30)))
+      ) {
+        console.warn(`⚠️  Last sentence looks incomplete: "${lastSentence.substring(0, 50)}..."`)
+
+        // Remove the last sentence entirely
+        chunkText = sentences.slice(0, -1).join(' ').trim()
+
+        if (chunkText.length < 50) {
+          console.warn('   ✗ Chunk too small after removing incomplete sentence. Discarding.')
+          return ''
+        }
+      }
+    }
+
     // CRITICAL: Strip trailing headers that leaked through
     // Common pattern: "...sentence. No. 12-3834 Javery v. Lucent Tech., Inc."
     const trailingHeaderPatterns = [
@@ -621,6 +532,13 @@ export default class DocumentChunker {
         }
         break // Only apply first matching pattern
       }
+    }
+
+    // FINAL CHECK: Minimum viable chunk size
+    const MIN_CHUNK_SIZE = 80
+    if (chunkText.length < MIN_CHUNK_SIZE) {
+      console.warn(`⚠️  Chunk too small after fixes (${chunkText.length} chars). Discarding.`)
+      return ''
     }
 
     return chunkText

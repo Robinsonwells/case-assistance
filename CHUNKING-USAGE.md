@@ -2,58 +2,57 @@
 
 ## Overview
 
-The DocumentChunker uses **continuous sentence accumulation with sliding windows**, **aggressive header stripping**, and **automatic boundary validation**. This creates consistent 8-sentence chunks with 2-sentence overlap, guaranteed to start with uppercase and end with proper punctuation.
+The DocumentChunker uses **per-paragraph sliding windows**, **aggressive header stripping**, **fragment rescue**, and **automatic boundary validation**. This creates semantic chunks that respect paragraph boundaries while maintaining 8-sentence windows with 2-sentence overlap.
 
 ## Chunking Strategy
 
-### Sentence Accumulator with Sliding Window
+### Per-Paragraph Sliding Window
 
-The chunker uses a **continuous sentence buffer** that accumulates sentences across paragraph boundaries until reaching the target chunk size (default: 8 sentences), then creates overlapping chunks with validated boundaries.
+The chunker uses a **per-paragraph sliding window** that respects paragraph boundaries and prevents mixing sentences from unrelated paragraphs. Each paragraph is independently chunked with overlapping windows (default: 8 sentences per chunk, 2 sentence overlap).
 
 **How It Works:**
 
 1. **Strip Headers**: Remove all legal headers before processing
 2. **Orphan Rescue**: Detect and merge paragraph fragments with adjacent paragraphs
-3. **Accumulate**: Sentences from all paragraphs are added to a buffer
-4. **Chunk**: When buffer reaches 8 sentences, create a chunk
-5. **Validate**: Check boundaries (uppercase start, punctuation end)
-6. **Slide**: Remove 6 sentences (8 - 2 overlap), keep 2 for next chunk
-7. **Repeat**: Continue accumulating and chunking throughout document
-8. **Flush**: Remaining sentences become final chunk
-9. **Report**: Validation report shows any quality issues
+3. **For Each Paragraph**:
+   - Extract all sentences from the paragraph
+   - Apply sliding window: create 8-sentence chunks with 6-sentence step
+   - Overlap ensures continuity: chunks share 2 sentences
+4. **Validate**: Check boundaries (uppercase start, punctuation end, minimum size)
+5. **Incomplete Sentence Detection**: Remove sentences that end mid-word or with dangling prepositions
+6. **Report**: Validation report shows any quality issues
 
 **Configuration:**
 - Window Size: 8 sentences (customizable)
 - Overlap: 2 sentences (customizable)
 - Step: 6 sentences (windowSize - overlap)
+- Minimum Chunk Size: 80 characters
 
 **Example Flow:**
 
 ```
-Document sentences: S1 S2 S3 S4 S5 S6 S7 S8 S9 S10 S11 S12 S13 S14 S15 S16
-
-Buffer accumulates: [S1, S2, S3, S4, S5, S6, S7, S8]
-→ Chunk 1: [S1, S2, S3, S4, S5, S6, S7, S8]
+Paragraph 1: [S1, S2, S3, S4, S5]
+→ Chunk 1: [S1, S2, S3, S4, S5] (5 sentences, < 8)
 → Validate: Starts uppercase ✓, Ends with punctuation ✓
-→ Slide by 6, keep [S7, S8] in buffer
 
-Buffer continues: [S7, S8, S9, S10, S11, S12, S13, S14]
-→ Chunk 2: [S7, S8, S9, S10, S11, S12, S13, S14] (overlaps with Chunk 1)
+Paragraph 2: [S6, S7, S8, S9, S10, S11, S12, S13, S14, S15]
+→ Chunk 2: [S6, S7, S8, S9, S10, S11, S12, S13] (sentences 0-7 from para)
 → Validate: Starts uppercase ✓, Ends with punctuation ✓
-→ Slide by 6, keep [S13, S14] in buffer
+→ Chunk 3: [S12, S13, S14, S15] (sentences 6-9 from para, overlaps with Chunk 2)
+→ Validate: Starts uppercase ✓, Ends with punctuation ✓
 
-Buffer continues: [S13, S14, S15, S16]
-→ Chunk 3: [S13, S14, S15, S16] (final chunk, less than 8 sentences)
+Paragraph 3: [S16, S17, S18]
+→ Chunk 4: [S16, S17, S18] (3 sentences, < 8)
 → Validate: Starts uppercase ✓, Ends with punctuation ✓
 ```
 
 **Benefits:**
 
-- **Consistent Size**: All chunks (except the last) have exactly 8 sentences
-- **Larger Context**: 8-sentence chunks capture more complete thoughts (vs. previous 6-sentence chunks)
-- **Paragraph Agnostic**: Works with any paragraph structure (handles legal PDFs with frequent line breaks)
-- **Continuous Context**: 2-sentence overlap preserves context between chunks
-- **No Information Loss**: Every sentence appears in at least one chunk
+- **Semantic Boundaries**: Chunks never cross paragraph boundaries (preserves topical coherence)
+- **Larger Context**: 8-sentence chunks capture complete thoughts
+- **Overlap for Continuity**: 2-sentence overlap within paragraphs maintains context
+- **No Mixed Topics**: Each chunk comes from a single semantic unit
+- **Better Retrieval**: Queries match chunks with cohesive topics
 - **Validated Quality**: Every chunk guaranteed to be well-formed
 
 ## Orphan Rescue: Fragment Detection and Merging
@@ -209,6 +208,83 @@ Or if issues found:
 - **Larger Context**: 8-sentence chunks capture complete technical details
 
 See `HEADER-PRESERVATION.md` for detailed examples and boundary validation logic.
+
+## Incomplete Sentence Detection
+
+**NEW:** The chunker automatically detects and removes incomplete sentences that end mid-word or with dangling prepositions.
+
+### What Are Incomplete Sentences?
+
+Incomplete sentences are chunks that end with partial text caused by:
+- Sentence breaks that split in the middle of a thought
+- Sentences ending with prepositions followed by next sentence
+- Mid-word cuts like "involved Under" (should be "involved supporting...")
+
+**Examples:**
+```
+Bad: "His job was fast-paced and it involved Under the terms..."
+             ↑ Sentence ends with "involved" but continues with "Under"
+
+Good: "His job was fast-paced and it involved supporting employees."
+             ↑ Complete sentence with proper ending
+```
+
+### How Detection Works
+
+The chunker checks the last sentence in each chunk for incomplete patterns:
+
+**Detection Criteria:**
+
+1. **Ends with preposition** - sentence ends with: `in, of, to, and, or, with, from, at, by, as, because, that, which, who`
+   - Example: "...the employee was engaged in."
+   - Action: Remove last sentence
+
+2. **Lowercase to uppercase** - last 30 chars contain pattern `[a-z] [A-Z]`
+   - Example: "...it involved Under the terms"
+   - Action: Remove last sentence
+
+**Example Flow:**
+
+```
+Original chunk: "His job required technical expertise. It was fast-paced and it involved Under the terms of the Plan..."
+
+Last sentence: "It was fast-paced and it involved Under the terms of the Plan..."
+
+Detection:
+- Check: Ends with preposition? No
+- Check: Contains "involved Under" (lowercase→uppercase)? YES ✓
+
+Action: Remove last sentence
+Result: "His job required technical expertise."
+
+Validation:
+- Length >= 80 chars? YES ✓
+- Keep chunk
+```
+
+**Console Output:**
+
+```
+⚠️  Last sentence looks incomplete: "It was fast-paced and it involved Under the ter..."
+   ✓ Removed incomplete sentence
+```
+
+### Minimum Chunk Size
+
+After all fixes (boundary validation, incomplete sentence removal, header stripping), chunks must be at least 80 characters:
+
+```
+⚠️  Chunk too small after fixes (45 chars). Discarding.
+```
+
+This prevents tiny orphan chunks with no semantic value.
+
+**Benefits:**
+
+- **Clean Endings**: No mid-sentence cuts or dangling prepositions
+- **Complete Context**: Chunks contain only fully-formed thoughts
+- **Better Embeddings**: Incomplete fragments don't pollute vector space
+- **Automatic**: Zero configuration required
 
 ## Usage
 
