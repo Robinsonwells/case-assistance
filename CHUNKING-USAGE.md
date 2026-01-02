@@ -13,13 +13,14 @@ The chunker uses a **continuous sentence buffer** that accumulates sentences acr
 **How It Works:**
 
 1. **Strip Headers**: Remove all legal headers before processing
-2. **Accumulate**: Sentences from all paragraphs are added to a buffer
-3. **Chunk**: When buffer reaches 8 sentences, create a chunk
-4. **Validate**: Check boundaries (uppercase start, punctuation end)
-5. **Slide**: Remove 6 sentences (8 - 2 overlap), keep 2 for next chunk
-6. **Repeat**: Continue accumulating and chunking throughout document
-7. **Flush**: Remaining sentences become final chunk
-8. **Report**: Validation report shows any quality issues
+2. **Orphan Rescue**: Detect and merge paragraph fragments with adjacent paragraphs
+3. **Accumulate**: Sentences from all paragraphs are added to a buffer
+4. **Chunk**: When buffer reaches 8 sentences, create a chunk
+5. **Validate**: Check boundaries (uppercase start, punctuation end)
+6. **Slide**: Remove 6 sentences (8 - 2 overlap), keep 2 for next chunk
+7. **Repeat**: Continue accumulating and chunking throughout document
+8. **Flush**: Remaining sentences become final chunk
+9. **Report**: Validation report shows any quality issues
 
 **Configuration:**
 - Window Size: 8 sentences (customizable)
@@ -54,6 +55,80 @@ Buffer continues: [S13, S14, S15, S16]
 - **Continuous Context**: 2-sentence overlap preserves context between chunks
 - **No Information Loss**: Every sentence appears in at least one chunk
 - **Validated Quality**: Every chunk guaranteed to be well-formed
+
+## Orphan Rescue: Fragment Detection and Merging
+
+**NEW:** The chunker automatically detects and merges paragraph fragments to prevent incomplete chunks.
+
+### What Are Fragments?
+
+Fragments are incomplete text units caused by PDF page breaks, legal citations split across lines, or weird formatting:
+
+**Examples:**
+```
+Fragment 1: ". . disability . . . from engaging in [his] occupation"
+Fragment 2: "(Admin. R."
+Fragment 3: "supporting [Lucent] employees and consultants round the clock"
+```
+
+These fragments appear when:
+- A sentence gets split by a page break
+- Legal citations are split across lines
+- PDF extraction creates weird ellipsis formatting (". . . text . . .")
+- Mid-sentence continuations from previous page
+
+### How Orphan Rescue Works
+
+**Detection Criteria:**
+
+A paragraph is flagged as a fragment if it:
+1. **Too short** (< 80 chars) and not a complete sentence
+2. **Starts with lowercase** - continuation from previous page
+3. **Starts with punctuation** (`. , ; : ( ) [ ]`) - weird formatting
+4. **Doesn't end properly** - no sentence terminator (. ! ?)
+5. **Incomplete citation** - ends with `(Admin. R.` or `(Admin. R. at`
+6. **Ellipsis formatting** - `. . disability . . .`
+7. **Incomplete reference** - ends with `(` or `[`
+
+**Merging Strategy:**
+
+When a fragment is detected:
+1. Look ahead to next paragraph
+2. Merge fragment + next paragraph
+3. If next paragraph is also a fragment, keep merging
+4. Stop when we find a complete paragraph
+5. Process the merged text as a single unit
+
+**Example Flow:**
+
+```
+Para 1: "Plaintiff's job required high cognitive functioning."
+Para 2: ". . disability . . . from engaging in [his] occupation"  ← FRAGMENT
+Para 3: "This meant he could not work as a software engineer."
+
+Processing:
+1. Para 1 → Normal processing
+2. Para 2 → Detected as fragment (starts with punctuation)
+3. Merge Para 2 + Para 3 → ". . disability . . . from engaging in [his] occupation This meant he could not work as a software engineer."
+4. Process merged text → Complete chunk with full context
+```
+
+**Console Output:**
+
+```
+Processing 143 paragraphs with sentence-based semantic boundaries
+Added 3 sentences from para 0. Buffer: 3 sentences
+  ⚠️  Detected fragment para 12: ". . disability . . . from engaging in [his] occupat..."
+  ✓ Merged fragment with para 13
+Added 2 sentences from merged fragment. Buffer: 5 sentences
+```
+
+**Benefits:**
+
+- **No Orphan Chunks**: Fragments are never processed standalone
+- **Complete Context**: Fragments reunited with their adjacent content
+- **Better Embeddings**: No semantic gaps from split sentences
+- **Automatic Detection**: Zero configuration required
 
 ## Legal Header Stripping
 

@@ -63,6 +63,47 @@ export default class DocumentChunker {
           continue
         }
 
+        // ORPHAN RESCUE: Check if this is a fragment that should be merged
+        if (this._isFragmentParagraph(paragraph)) {
+          console.log(`  ⚠️  Detected fragment para ${paraIdx}: "${paragraph.substring(0, 60)}..."`)
+
+          // Look ahead and merge with next paragraph(s) until we find a complete one
+          let mergedText = paragraph
+          let lookAhead = 1
+
+          while (paraIdx + lookAhead < paragraphs.length) {
+            const nextPara = paragraphs[paraIdx + lookAhead].trim()
+
+            if (nextPara.length === 0) {
+              lookAhead++
+              continue
+            }
+
+            // Merge fragment with next paragraph
+            mergedText = (mergedText + ' ' + nextPara).trim()
+
+            // If next paragraph is NOT a fragment, we're done merging
+            if (!this._isFragmentParagraph(nextPara)) {
+              console.log(`  ✓ Merged fragment with para ${paraIdx + lookAhead}`)
+              break
+            }
+
+            lookAhead++
+          }
+
+          // Extract sentences from merged text
+          const sentences = this._extractSentences(mergedText)
+
+          if (sentences.length > 0) {
+            sentenceBuffer.push(...sentences)
+            console.log(`Added ${sentences.length} sentences from merged fragment. Buffer: ${sentenceBuffer.length} sentences`)
+          }
+
+          // Skip all paragraphs we merged
+          paraIdx += (lookAhead + 1)
+          continue
+        }
+
         // Extract sentences from current paragraph
         const sentences = this._extractSentences(paragraph)
 
@@ -402,6 +443,77 @@ export default class DocumentChunker {
     }
 
     if (line.length < 100 && line === line.toUpperCase() && /^[A-Z\s.,'-]+$/.test(line)) {
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Detects paragraph fragments that should be merged with adjacent paragraphs
+   *
+   * Fragments are incomplete text units caused by:
+   * - PDF page breaks splitting sentences
+   * - Legal citations split across lines
+   * - Weird formatting (". . . text . . .")
+   * - Mid-sentence continuations
+   *
+   * Detection criteria:
+   * 1. Too short (< 80 chars) - likely incomplete
+   * 2. Starts with lowercase or punctuation - continuation from previous page
+   * 3. Doesn't end with sentence terminator - incomplete sentence
+   * 4. Incomplete citation like "(Admin. R." or "[his]"
+   * 5. Weird ellipsis formatting ". . . text . . ."
+   *
+   * @private
+   * @param {string} text - Paragraph text to check
+   * @returns {boolean} - True if paragraph is a fragment
+   */
+  _isFragmentParagraph(text) {
+    if (!text || text.length === 0) {
+      return false
+    }
+
+    const trimmed = text.trim()
+
+    // 1. Too short - likely incomplete (unless it's a proper short sentence)
+    if (trimmed.length < 80 && !/^[A-Z].*[.!?]$/.test(trimmed)) {
+      return true
+    }
+
+    // 2. Starts with lowercase - continuation from previous page
+    // Example: "supporting [Lucent] employees and consultants..."
+    if (/^[a-z]/.test(trimmed)) {
+      return true
+    }
+
+    // 3. Starts with punctuation (excluding valid opening like quotes)
+    // Example: ". . disability . . . from engaging..."
+    if (/^[.,;:()\[\]]/.test(trimmed)) {
+      return true
+    }
+
+    // 4. Doesn't end with sentence terminator
+    // Exception: Allow if it's a proper bullet point or numbered list
+    if (!/[.!?"]$/.test(trimmed) && !/^\d+\./.test(trimmed)) {
+      return true
+    }
+
+    // 5. Incomplete citation patterns
+    // Example: "(Admin. R." or "(Admin. R. at" or "[his]"
+    if (/\(Admin\.\s+R\.\s*$/.test(trimmed) || /\(Admin\.\s+R\.\s+at\s*$/.test(trimmed)) {
+      return true
+    }
+
+    // 6. Weird ellipsis formatting common in legal docs
+    // Example: ". . disability . . ." or ". . . from engaging . . ."
+    if (/^\.\s+\.\s+/.test(trimmed) || /\.\s+\.\s+\.$/.test(trimmed)) {
+      return true
+    }
+
+    // 7. Ends with incomplete bracket or parenthesis reference
+    // Example: "...as defined in the Plan ("
+    if (/\($/.test(trimmed) || /\[$/.test(trimmed)) {
       return true
     }
 
