@@ -95,12 +95,14 @@ export default class PDFExtractor {
         continue
       }
 
-      const endsWithPunctuation = /[.!?]$/.test(line.trim())
+      const trimmedLine = line.trim()
+      const endsWithPunctuation = /[.!?]$/.test(trimmedLine)
+      const endsWithAbbreviation = /\b(Dr|Mr|Ms|Mrs|Prof|Sr|Jr|Inc|Ltd|Co|Corp|vs|No|Fig|Vol|etc|St|Ave|Dept|Esq|Hon|Rev|Admin|Supp|Cir|App|pg)\.$/.test(trimmedLine)
       const nextStartsWithCapital = /^[A-Z]/.test(nextLine.trim())
       const isShortLine = line.length < 80
-      const isHeader = /^[A-Z\s_-]+$/.test(line.trim()) && line.length < 100
+      const isHeader = /^[A-Z\s_-]+$/.test(trimmedLine) && line.length < 100
 
-      if (isHeader || (endsWithPunctuation && nextStartsWithCapital && isShortLine)) {
+      if (isHeader || (endsWithPunctuation && !endsWithAbbreviation && nextStartsWithCapital && isShortLine)) {
         paragraphs.push(currentParagraph.join(' '))
         currentParagraph = []
       }

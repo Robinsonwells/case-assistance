@@ -38,34 +38,18 @@ export default class DocumentChunker {
         .map(p => p.trim())
         .filter(p => p.length > 0)
 
-      // Group consecutive bullet points with their context
-      let currentChunk = []
-      let chunkIdx = 0
-
-      for (let i = 0; i < paragraphs.length; i++) {
-        const para = paragraphs[i]
-        const isBullet = /^[•\-\*]/.test(para) || /^\d+\./.test(para)
-        const nextIsBullet = i + 1 < paragraphs.length &&
-          (/^[•\-\*]/.test(paragraphs[i + 1]) || /^\d+\./.test(paragraphs[i + 1]))
-
-        currentChunk.push(para)
-
-        // End chunk if next paragraph is not a bullet or we're at the end
-        if (!nextIsBullet || i === paragraphs.length - 1) {
-          chunks.push({
-            id: `para_${chunkIdx}`,
-            text: currentChunk.join('\n\n'),
-            type: 'paragraph',
-            metadata: {
-              paragraph: chunkIdx,
-              paragraphCount: paragraphs.length,
-              hasBullets: currentChunk.some(p => /^[•\-\*]/.test(p) || /^\d+\./.test(p))
-            }
-          })
-          currentChunk = []
-          chunkIdx++
-        }
-      }
+      // One paragraph = one chunk, no exceptions
+      paragraphs.forEach((paragraph, idx) => {
+        chunks.push({
+          id: `para_${idx}`,
+          text: paragraph,
+          type: 'paragraph',
+          metadata: {
+            paragraph: idx,
+            paragraphCount: paragraphs.length
+          }
+        })
+      })
 
       console.log(`✓ Created ${chunks.length} paragraph chunks`)
       return chunks
