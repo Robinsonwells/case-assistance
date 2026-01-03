@@ -1,12 +1,19 @@
 /**
- * DocumentChunker - Text processing utility for breaking documents into chunks
- * Splits ONLY by paragraph boundaries (double newlines)
+ * DocumentChunker - Text processing utility for structured documents
+ *
+ * IMPORTANT: Only use for documents with explicit paragraph structure:
+ * - .txt files
+ * - .doc/.docx files
+ * - .md files
+ * - Any format with reliable \n\n paragraph breaks
+ *
+ * Do NOT use for PDFs - use TokenChunker instead.
  */
 
 export default class DocumentChunker {
-  constructor() {
-    // Pattern for spaced ellipses in legal documents (e.g., ". . ." or " . . . ")
-    this.ellipsisPattern = /(\s*\.\s+){2,}/g
+  constructor(config = {}) {
+    // Maximum paragraph size before splitting (in characters)
+    this.maxParagraphSize = config.maxParagraphSize || 5000
   }
 
   /**
@@ -30,26 +37,32 @@ export default class DocumentChunker {
         return chunks
       }
 
+      // Split on double newlines (paragraph boundaries)
       const paragraphs = cleanText
         .split(/\n\s*\n+/)
         .map(p => p.trim())
         .filter(p => p.length > 0)
 
-      const mergedParagraphs = this._mergeHeadingsWithContent(paragraphs)
-
-      mergedParagraphs.forEach((paragraph, idx) => {
-        chunks.push({
-          id: `para_${idx}`,
-          text: paragraph,
-          type: 'paragraph',
-          metadata: {
-            paragraph: idx,
-            paragraphCount: mergedParagraphs.length
-          }
-        })
+      // Process each paragraph
+      paragraphs.forEach((paragraph, idx) => {
+        // If paragraph exceeds max size, split it by tokens
+        if (paragraph.length > this.maxParagraphSize) {
+          const subChunks = this._splitOversizedParagraph(paragraph, idx)
+          chunks.push(...subChunks)
+        } else {
+          chunks.push({
+            id: `para_${idx}`,
+            text: paragraph,
+            type: 'paragraph',
+            metadata: {
+              paragraphIndex: idx,
+              totalParagraphs: paragraphs.length
+            }
+          })
+        }
       })
 
-      console.log(`✓ Created ${chunks.length} paragraph chunks (merged from ${paragraphs.length} raw paragraphs)`)
+      console.log(`✓ Created ${chunks.length} paragraph chunks from ${paragraphs.length} paragraphs`)
       return chunks
     } catch (err) {
       console.error('Error in chunkByParagraph:', err)
@@ -58,58 +71,50 @@ export default class DocumentChunker {
   }
 
   /**
-   * Merge orphaned section headings with following content
+   * Split oversized paragraphs into smaller chunks
    * @private
-   * @param {Array<string>} paragraphs - Raw paragraphs
-   * @returns {Array<string>} - Merged paragraphs
    */
-  _mergeHeadingsWithContent(paragraphs) {
-    const merged = []
-    let i = 0
+  _splitOversizedParagraph(paragraph, paragraphIndex) {
+    const chunks = []
+    const targetSize = 1200 // characters
+    const overlap = 200 // characters
 
-    while (i < paragraphs.length) {
-      const para = paragraphs[i]
+    let position = 0
+    let subIndex = 0
 
-      const isHeading = this._isHeadingLike(para)
+    while (position < paragraph.length) {
+      const chunkEnd = Math.min(position + targetSize, paragraph.length)
+      let chunkText = paragraph.slice(position, chunkEnd)
 
-      if (isHeading && i + 1 < paragraphs.length) {
-        const nextPara = paragraphs[i + 1]
-        merged.push(`${para}\n\n${nextPara}`)
-        i += 2
-      } else {
-        merged.push(para)
-        i++
+      // Try to break at sentence boundary if not at end
+      if (chunkEnd < paragraph.length) {
+        const lastPeriod = chunkText.lastIndexOf('. ')
+        const lastQuestion = chunkText.lastIndexOf('? ')
+        const lastExclaim = chunkText.lastIndexOf('! ')
+        const lastBreak = Math.max(lastPeriod, lastQuestion, lastExclaim)
+
+        if (lastBreak > chunkText.length * 0.8) {
+          chunkText = chunkText.slice(0, lastBreak + 2)
+        }
       }
+
+      chunks.push({
+        id: `para_${paragraphIndex}_sub_${subIndex}`,
+        text: chunkText.trim(),
+        type: 'paragraph_split',
+        metadata: {
+          paragraphIndex,
+          subChunkIndex: subIndex,
+          isSplit: true
+        }
+      })
+
+      position += chunkText.length - overlap
+      if (chunkText.length === 0) position += targetSize
+      subIndex++
     }
 
-    return merged
-  }
-
-  /**
-   * Check if a paragraph looks like a heading
-   * @private
-   * @param {string} text - Text to check
-   * @returns {boolean} - True if looks like a heading
-   */
-  _isHeadingLike(text) {
-    if (!text || text.length === 0) return false
-
-    if (text.length > 100) return false
-
-    if (/^[A-Z\s]+$/.test(text) && text.length < 50) {
-      return true
-    }
-
-    if (/^[A-Z][A-Za-z\s]+$/.test(text) && text.length < 80 && !/[.!?]$/.test(text)) {
-      return true
-    }
-
-    const romanNumeralPattern = /^[IVX]+\.\s+[A-Z]/
-    if (romanNumeralPattern.test(text) && text.length < 80) {
-      return true
-    }
-
-    return false
+    return chunks
   }
 
   /**

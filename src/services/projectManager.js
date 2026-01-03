@@ -1,4 +1,5 @@
 import DocumentChunker from './documentChunker'
+import TokenChunker from './tokenChunker'
 import EmbeddingGenerator from './embeddingGenerator'
 import RAGRetriever from './ragRetriever'
 import PerplexityAPI from './perplexityAPI'
@@ -18,16 +19,17 @@ export default class ProjectManager {
     this.currentProjectName = null
 
     // Service instances
-    this.chunker = new DocumentChunker()
+    this.paragraphChunker = new DocumentChunker()
+    this.tokenChunker = new TokenChunker({
+      targetTokens: 1000,
+      maxTokens: 1200,
+      minTokens: 600,
+      overlapTokens: 300
+    })
     this.embeddingGenerator = new EmbeddingGenerator()
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
-    this.pdfExtractor = new PDFExtractor({
-      paragraphGapMultiplier: 2.5,
-      minParagraphLength: 100,
-      enableValidation: true,
-      enableAutoMerge: true
-    })
+    this.pdfExtractor = new PDFExtractor()
   }
 
   /**
@@ -169,38 +171,49 @@ export default class ProjectManager {
         throw new Error('No file provided')
       }
 
-      // Extract and chunk based on file type
+      const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
       let chunks
-      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        console.log('Extracting paragraphs from PDF...')
-        chunks = await this.pdfExtractor.extractTextAsChunks(file)
+
+      if (isPDF) {
+        // PDF: Use token-based chunking
+        console.log('📄 Processing PDF with token-based chunking...')
+
+        // Extract raw text from PDF
+        const extractionResult = await this.pdfExtractor.extractText(file)
+        const { text, pageCount, pageRanges } = extractionResult
+
+        console.log(`✓ Extracted ${text.length} characters from ${pageCount} pages`)
+
+        // Chunk by tokens with overlap
+        chunks = this.tokenChunker.chunkByTokens(text, {
+          sourceFile: file.name,
+          pageCount,
+          documentType: 'pdf'
+        })
+
+        // Enrich chunks with page information
+        chunks = this._enrichChunksWithPageInfo(chunks, pageRanges)
+
+        console.log(`✓ Created ${chunks.length} token-based chunks with 300-token overlap`)
       } else {
+        // Structured documents: Use paragraph-based chunking
+        console.log('📝 Processing structured document with paragraph-based chunking...')
+
         const fileText = await file.text()
-        chunks = this.chunker.chunkByParagraph(fileText)
+        chunks = this.paragraphChunker.chunkByParagraph(fileText)
+
+        console.log(`✓ Created ${chunks.length} paragraph-based chunks`)
       }
 
-
-      // Validate chunks for quality issues
-      const validationReport = this.chunker.getChunkValidationReport(chunks)
-      console.log('Chunk Validation Report:', validationReport.report)
-
-      if (!validationReport.isValid) {
-        console.warn('⚠️  Chunk quality issues detected:')
-        validationReport.issues.forEach(issue => {
-          console.warn(`  - ${issue.severity}: ${issue.issue} in chunk ${issue.chunkIndex}`)
-          if (issue.text) {
-            console.warn(`    "${issue.text}..."`)
-          }
-        })
-      } else {
-        console.log('✓ All chunks passed validation')
+      if (chunks.length === 0) {
+        throw new Error('No chunks were created from the document. The file may be empty or invalid.')
       }
 
       // Extract text from chunks for batch embedding
       const chunkTexts = chunks.map(chunk => chunk.text)
 
       // Generate embeddings using memory-efficient batch processing
-      console.log(`Generating embeddings for ${chunks.length} chunks with batch processing...`)
+      console.log(`Generating embeddings for ${chunks.length} chunks...`)
       const embeddings = await this.embeddingGenerator.generateEmbeddings(chunkTexts, {
         batchSize: 50,
         onProgress: options.onProgress
@@ -222,6 +235,7 @@ export default class ProjectManager {
         originalFilename: file.name,
         uploadedAt: new Date().toISOString(),
         chunkCount: chunksWithEmbeddings.length,
+        chunkingStrategy: isPDF ? 'token-based' : 'paragraph-based',
         chunks: chunksWithEmbeddings
       }
 
@@ -234,7 +248,7 @@ export default class ProjectManager {
       // Update project metadata
       await this._updateProjectMetadata(jsonFilename, file.name)
 
-      console.log(`Document "${file.name}" uploaded and processed`)
+      console.log(`✅ Document "${file.name}" uploaded and processed successfully`)
       return {
         fileName: jsonFilename,
         chunkCount: chunksWithEmbeddings.length
@@ -243,6 +257,38 @@ export default class ProjectManager {
       console.error('Error uploading document:', err)
       throw new Error(`Failed to upload document: ${err.message}`)
     }
+  }
+
+  /**
+   * Enrich chunks with page information
+   * @private
+   */
+  _enrichChunksWithPageInfo(chunks, pageRanges) {
+    return chunks.map(chunk => {
+      const charStart = chunk.metadata.charStart
+      const charEnd = chunk.metadata.charEnd
+
+      // Find which pages this chunk spans
+      const pagesSpanned = pageRanges.filter(range => {
+        return (charStart >= range.startChar && charStart < range.endChar) ||
+               (charEnd > range.startChar && charEnd <= range.endChar) ||
+               (charStart <= range.startChar && charEnd >= range.endChar)
+      })
+
+      const pageNumbers = pagesSpanned.map(p => p.page)
+      const pageStart = pageNumbers.length > 0 ? Math.min(...pageNumbers) : null
+      const pageEnd = pageNumbers.length > 0 ? Math.max(...pageNumbers) : null
+
+      return {
+        ...chunk,
+        metadata: {
+          ...chunk.metadata,
+          pageStart,
+          pageEnd,
+          pagesSpanned: pageNumbers
+        }
+      }
+    })
   }
 
   /**
@@ -357,7 +403,8 @@ If the information is not in the context, say "I don't have information about th
         content: chunk.text,
         fileName: chunk.metadata?.sourceFile || 'Unknown file',
         similarity: chunk.score, // Score is cosine similarity (0-1)
-        semanticScore: chunk.semanticScore // Semantic similarity score
+        semanticScore: chunk.semanticScore, // Semantic similarity score
+        metadata: chunk.metadata // Include all metadata (page info, etc.)
       }))
 
       return {

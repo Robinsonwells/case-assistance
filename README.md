@@ -34,9 +34,9 @@ Features
 Core Functionality
 ✅ Multi-Project Management - Organize documents by project/case
 
-✅ Smart Document Upload - PDF, DOCX, TXT support with automatic chunking
+✅ Smart Document Upload - PDF, DOCX, TXT support with intelligent chunking
 
-✅ Hybrid Chunking Strategy - Paragraph + sentence-level with overlap for context preservation
+✅ Dual Chunking Strategy - Token-based for PDFs, paragraph-based for structured documents (see CHUNKING-STRATEGY.md)
 
 ✅ Local Embeddings - 768-dimensional vectors generated in-browser (all-MiniLM-L6-v2 model)
 
