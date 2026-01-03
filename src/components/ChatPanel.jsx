@@ -101,9 +101,11 @@ function SourcesExpander({ sources }) {
 export default function ChatPanel({ projectManager, projectName, documentCount }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [queryQueue, setQueryQueue] = useState([])
+  const [isProcessing, setIsProcessing] = useState(false)
   const [error, setError] = useState('')
   const messagesEndRef = useRef(null)
+  const processingRef = useRef(false)
 
   useEffect(() => {
     const savedMessages = localStorage.getItem(`chat_history_${projectName}`)
@@ -128,41 +130,97 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Process query queue
+  useEffect(() => {
+    const processQueue = async () => {
+      if (processingRef.current || queryQueue.length === 0) {
+        return
+      }
+
+      processingRef.current = true
+      setIsProcessing(true)
+
+      const currentQuery = queryQueue[0]
+
+      // Update message status to processing
+      setMessages(prev => prev.map(msg =>
+        msg.id === currentQuery.placeholderId
+          ? { ...msg, status: 'processing' }
+          : msg
+      ))
+
+      try {
+        const result = await projectManager.queryProject(currentQuery.question)
+
+        const aiMessage = {
+          id: Date.now(),
+          role: 'assistant',
+          content: result.answer,
+          sourcesCount: result.relevantChunks?.length || 0,
+          sources: result.relevantChunks || [],
+          timestamp: new Date().toLocaleTimeString(),
+          status: 'completed'
+        }
+
+        // Update user message to completed and add AI response
+        setMessages(prev => [
+          ...prev.map(msg =>
+            msg.id === currentQuery.placeholderId
+              ? { ...msg, status: 'completed' }
+              : msg
+          ),
+          aiMessage
+        ])
+
+        setError('')
+      } catch (err) {
+        console.error('Query error:', err)
+
+        // Mark message as failed
+        setMessages(prev => prev.map(msg =>
+          msg.id === currentQuery.placeholderId
+            ? { ...msg, status: 'failed', error: err.message }
+            : msg
+        ))
+
+        setError(err.message || 'Failed to get response')
+      }
+
+      // Remove processed query from queue
+      setQueryQueue(prev => prev.slice(1))
+      processingRef.current = false
+      setIsProcessing(false)
+    }
+
+    processQueue()
+  }, [queryQueue, projectManager])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!input.trim() || loading) return
+    if (!input.trim()) return
+
+    const questionText = input.trim()
+    const messageId = Date.now()
 
     const userMessage = {
-      id: Date.now(),
+      id: messageId,
       role: 'user',
-      content: input.trim(),
-      timestamp: new Date().toLocaleTimeString()
+      content: questionText,
+      timestamp: new Date().toLocaleTimeString(),
+      status: 'queued'
     }
 
     setMessages(prev => [...prev, userMessage])
     setInput('')
-    setLoading(true)
-    setError('')
 
-    try {
-      const result = await projectManager.queryProject(input.trim())
-
-      const aiMessage = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: result.answer,
-        sourcesCount: result.relevantChunks?.length || 0,
-        sources: result.relevantChunks || [],
-        timestamp: new Date().toLocaleTimeString()
+    // Add to queue
+    setQueryQueue(prev => [
+      ...prev,
+      {
+        question: questionText,
+        placeholderId: messageId
       }
-
-      setMessages(prev => [...prev, aiMessage])
-    } catch (err) {
-      console.error('Query error:', err)
-      setError(err.message || 'Failed to get response')
-    } finally {
-      setLoading(false)
-    }
+    ])
   }
 
   const clearChat = () => {
@@ -219,6 +277,35 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
                   )}
                   <div className="flex items-center gap-2 mt-2 text-xs opacity-70">
                     <span>{msg.timestamp}</span>
+                    {msg.role === 'user' && msg.status && (
+                      <span className="flex items-center gap-1">
+                        {msg.status === 'queued' && (
+                          <>
+                            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+                            </svg>
+                            <span>Queued</span>
+                          </>
+                        )}
+                        {msg.status === 'processing' && (
+                          <>
+                            <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Processing</span>
+                          </>
+                        )}
+                        {msg.status === 'failed' && (
+                          <>
+                            <svg className="w-3 h-3 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                            </svg>
+                            <span className="text-red-400">Failed</span>
+                          </>
+                        )}
+                      </span>
+                    )}
                   </div>
                   {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
                     <SourcesExpander sources={msg.sources} />
@@ -226,17 +313,6 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
                 </div>
               </div>
             ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-slate-700 rounded-lg px-4 py-3">
-                  <div className="flex items-center gap-2 text-slate-400">
-                    <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-slate-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                  </div>
-                </div>
-              </div>
-            )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -246,6 +322,17 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
         {error && (
           <div className="mb-3 p-2 bg-red-900/30 border border-red-700/50 rounded text-sm text-red-300">
             {error}
+          </div>
+        )}
+        {queryQueue.length > 0 && (
+          <div className="mb-3 p-2 bg-blue-900/30 border border-blue-700/50 rounded text-sm text-blue-300 flex items-center gap-2">
+            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>
+              Processing {queryQueue.length} {queryQueue.length === 1 ? 'query' : 'queries'}...
+            </span>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex gap-3">
@@ -261,18 +348,17 @@ export default function ChatPanel({ projectManager, projectName, documentCount }
             placeholder="Ask a question about your documents..."
             className="flex-1 resize-none bg-slate-700 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
             rows={3}
-            disabled={loading}
           />
           <button
             type="submit"
-            disabled={loading || !input.trim()}
+            disabled={!input.trim()}
             className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors self-end"
           >
-            {loading ? 'Sending...' : 'Send'}
+            Send
           </button>
         </form>
         <p className="text-xs text-slate-500 mt-2">
-          Press Enter to send, Shift+Enter for new line
+          Press Enter to send, Shift+Enter for new line{queryQueue.length > 0 ? ' • Queries are processed in order' : ''}
         </p>
       </div>
     </div>
