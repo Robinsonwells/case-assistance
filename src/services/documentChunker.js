@@ -1,6 +1,6 @@
 /**
  * DocumentChunker - Text processing utility for breaking documents into chunks
- * Supports simple paragraph-based chunking
+ * Splits ONLY by paragraph boundaries (double newlines)
  */
 
 export default class DocumentChunker {
@@ -11,9 +11,7 @@ export default class DocumentChunker {
 
   /**
    * Simple paragraph-based chunking
-   * Splits document by paragraph boundaries only, no sentence-level processing
-   * 
-   * Useful for documents with natural paragraph breaks and less context overlap needed
+   * Splits document by paragraph boundaries only (double newlines)
    * 
    * @param {string} text - Raw document text to chunk
    * @returns {array} - Array of paragraph chunk objects
@@ -34,7 +32,7 @@ export default class DocumentChunker {
         return chunks
       }
 
-      // Split into paragraphs by double newlines
+      // Split ONLY by double newlines (paragraph boundaries)
       const paragraphs = cleanText
         .split(/\n\s*\n+/)
         .map(p => p.trim())
@@ -63,10 +61,6 @@ export default class DocumentChunker {
 
   /**
    * Get statistics about chunks
-   * Useful for debugging and understanding chunk quality
-   * 
-   * @param {array} chunks - Array of chunks to analyze
-   * @returns {object} - Statistics object
    */
   getChunkStats(chunks) {
     if (!chunks || chunks.length === 0) {
@@ -83,7 +77,6 @@ export default class DocumentChunker {
     const sizes = chunks.map(c => c.text.length)
     const totalChars = sizes.reduce((sum, size) => sum + size, 0)
 
-    // Count by type
     const byType = {}
     chunks.forEach(chunk => {
       byType[chunk.type] = (byType[chunk.type] || 0) + 1
@@ -101,14 +94,6 @@ export default class DocumentChunker {
 
   /**
    * Validate chunks for common quality issues
-   * 
-   * Checks for:
-   * - Chunks starting with lowercase (mid-sentence cuts)
-   * - Chunks not ending with sentence terminators
-   * - Chunks that are too short
-   * 
-   * @param {array} chunks - Array of chunk objects to validate
-   * @returns {object} - Validation report with issues found
    */
   getChunkValidationReport(chunks) {
     const issues = []
@@ -116,7 +101,7 @@ export default class DocumentChunker {
     chunks.forEach((chunk, idx) => {
       const text = chunk.text
 
-      // Issue 1: Starts with lowercase (indicates fragment)
+      // Issue 1: Starts with lowercase
       if (text && text.length > 0 && /^[a-z]/.test(text[0])) {
         issues.push({
           chunkId: chunk.id,
@@ -127,7 +112,7 @@ export default class DocumentChunker {
         })
       }
 
-      // Issue 2: Doesn't end with . ! or ?
+      // Issue 2: Doesn't end with punctuation
       if (text && text.length > 0 && !/[.!?"]$/.test(text)) {
         issues.push({
           chunkId: chunk.id,
@@ -138,7 +123,7 @@ export default class DocumentChunker {
         })
       }
 
-      // Issue 3: Too short (< 50 chars is probably garbage)
+      // Issue 3: Too short
       if (text && text.length < 50) {
         issues.push({
           chunkId: chunk.id,
@@ -150,7 +135,6 @@ export default class DocumentChunker {
       }
     })
 
-    // Group issues by severity
     const critical = issues.filter(i => i.severity === 'CRITICAL')
     const high = issues.filter(i => i.severity === 'HIGH')
     const medium = issues.filter(i => i.severity === 'MEDIUM')
