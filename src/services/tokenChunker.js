@@ -56,6 +56,7 @@ export default class TokenChunker {
 
       let position = 0
       let chunkIndex = 0
+      const minChars = this.minTokens * this.charsPerToken
 
       while (position < cleanText.length) {
         // Calculate chunk end position
@@ -83,7 +84,7 @@ export default class TokenChunker {
         const tokenCount = Math.round(chunkText.length / this.charsPerToken)
 
         // Create chunk object
-        chunks.push({
+        const chunk = {
           id: `token_chunk_${chunkIndex}`,
           text: chunkText.trim(),
           type: 'token',
@@ -96,18 +97,40 @@ export default class TokenChunker {
             tokenCount,
             ...metadata
           }
-        })
-
-        // Move position forward, accounting for overlap
-        const actualChunkLength = chunkText.length
-        position += actualChunkLength - overlapChars
-
-        // Ensure we always make progress (avoid infinite loop)
-        if (actualChunkLength === 0) {
-          position += targetChars
         }
 
+        chunks.push(chunk)
+
+        // Calculate how much to advance
+        const actualChunkLength = chunkText.length
+        const proposedAdvance = actualChunkLength - overlapChars
+
+        // Ensure minimum forward progress to prevent infinite loops
+        // Always advance at least 25% of target size
+        const minAdvance = Math.floor(targetChars * 0.25)
+        const advance = Math.max(proposedAdvance, minAdvance)
+
+        position += advance
         chunkIndex++
+      }
+
+      // Enforce minimum token size on final chunk
+      if (chunks.length > 1) {
+        const lastChunk = chunks[chunks.length - 1]
+        const lastChunkTokens = lastChunk.metadata.tokenCount
+
+        if (lastChunkTokens < this.minTokens) {
+          // Merge final chunk with previous chunk
+          const prevChunk = chunks[chunks.length - 2]
+
+          prevChunk.text = prevChunk.text + '\n\n' + lastChunk.text
+          prevChunk.metadata.tokenEnd = lastChunk.metadata.tokenEnd
+          prevChunk.metadata.charEnd = lastChunk.metadata.charEnd
+          prevChunk.metadata.tokenCount = Math.round(prevChunk.text.length / this.charsPerToken)
+
+          // Remove the undersized final chunk
+          chunks.pop()
+        }
       }
 
       console.log(`✓ Created ${chunks.length} token-based chunks`)

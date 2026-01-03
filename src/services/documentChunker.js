@@ -12,8 +12,14 @@
 
 export default class DocumentChunker {
   constructor(config = {}) {
-    // Maximum paragraph size before splitting (in characters)
-    this.maxParagraphSize = config.maxParagraphSize || 5000
+    // Maximum paragraph size before splitting (in tokens)
+    this.maxParagraphTokens = config.maxParagraphTokens || 1200
+
+    // Characters per token (approximate for English)
+    this.charsPerToken = config.charsPerToken || 4
+
+    // Overlap when splitting oversized paragraphs (in tokens)
+    this.overlapTokens = config.overlapTokens || 200
   }
 
   /**
@@ -45,8 +51,11 @@ export default class DocumentChunker {
 
       // Process each paragraph
       paragraphs.forEach((paragraph, idx) => {
-        // If paragraph exceeds max size, split it by tokens
-        if (paragraph.length > this.maxParagraphSize) {
+        // Calculate approximate token count
+        const paragraphTokens = Math.round(paragraph.length / this.charsPerToken)
+
+        // If paragraph exceeds max tokens, split it
+        if (paragraphTokens > this.maxParagraphTokens) {
           const subChunks = this._splitOversizedParagraph(paragraph, idx)
           chunks.push(...subChunks)
         } else {
@@ -56,7 +65,8 @@ export default class DocumentChunker {
             type: 'paragraph',
             metadata: {
               paragraphIndex: idx,
-              totalParagraphs: paragraphs.length
+              totalParagraphs: paragraphs.length,
+              tokenCount: paragraphTokens
             }
           })
         }
@@ -71,19 +81,19 @@ export default class DocumentChunker {
   }
 
   /**
-   * Split oversized paragraphs into smaller chunks
+   * Split oversized paragraphs into smaller chunks using token-aware splitting
    * @private
    */
   _splitOversizedParagraph(paragraph, paragraphIndex) {
     const chunks = []
-    const targetSize = 1200 // characters
-    const overlap = 200 // characters
+    const targetChars = this.maxParagraphTokens * this.charsPerToken
+    const overlapChars = this.overlapTokens * this.charsPerToken
 
     let position = 0
     let subIndex = 0
 
     while (position < paragraph.length) {
-      const chunkEnd = Math.min(position + targetSize, paragraph.length)
+      const chunkEnd = Math.min(position + targetChars, paragraph.length)
       let chunkText = paragraph.slice(position, chunkEnd)
 
       // Try to break at sentence boundary if not at end
@@ -93,10 +103,13 @@ export default class DocumentChunker {
         const lastExclaim = chunkText.lastIndexOf('! ')
         const lastBreak = Math.max(lastPeriod, lastQuestion, lastExclaim)
 
+        // Only break at sentence if it's in the last 20% of the chunk
         if (lastBreak > chunkText.length * 0.8) {
           chunkText = chunkText.slice(0, lastBreak + 2)
         }
       }
+
+      const tokenCount = Math.round(chunkText.length / this.charsPerToken)
 
       chunks.push({
         id: `para_${paragraphIndex}_sub_${subIndex}`,
@@ -105,13 +118,34 @@ export default class DocumentChunker {
         metadata: {
           paragraphIndex,
           subChunkIndex: subIndex,
-          isSplit: true
+          isSplit: true,
+          tokenCount
         }
       })
 
-      position += chunkText.length - overlap
-      if (chunkText.length === 0) position += targetSize
+      // Calculate advance with minimum progress guarantee
+      const actualChunkLength = chunkText.length
+      const proposedAdvance = actualChunkLength - overlapChars
+      const minAdvance = Math.floor(targetChars * 0.25)
+      const advance = Math.max(proposedAdvance, minAdvance)
+
+      position += advance
       subIndex++
+    }
+
+    // Merge final sub-chunk if it's too small (less than 50% of target)
+    if (chunks.length > 1) {
+      const lastChunk = chunks[chunks.length - 1]
+      const minTokens = Math.floor(this.maxParagraphTokens * 0.5)
+
+      if (lastChunk.metadata.tokenCount < minTokens) {
+        const prevChunk = chunks[chunks.length - 2]
+
+        prevChunk.text = prevChunk.text + '\n\n' + lastChunk.text
+        prevChunk.metadata.tokenCount = Math.round(prevChunk.text.length / this.charsPerToken)
+
+        chunks.pop()
+      }
     }
 
     return chunks

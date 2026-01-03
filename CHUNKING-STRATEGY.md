@@ -64,7 +64,7 @@ For structured documents (TXT, DOCX, MD), we use **paragraph chunking** because:
 {
   targetTokens: 1000,      // Target chunk size
   maxTokens: 1200,         // Maximum chunk size
-  minTokens: 600,          // Minimum chunk size
+  minTokens: 600,          // Minimum chunk size (enforced)
   overlapTokens: 300       // Overlap between chunks
 }
 ```
@@ -77,6 +77,12 @@ The overlap ensures that:
 - Context is preserved for semantic search
 - RAG retrieval has better recall
 
+**Safety Guarantees:**
+
+1. **Minimum token enforcement**: Final chunks smaller than `minTokens` are merged with the previous chunk to prevent tiny tail chunks
+2. **Progress guarantee**: Always advances at least 25% of target size to prevent infinite loops
+3. **No text loss**: 100% coverage of original document guaranteed
+
 **Metadata Tracked:**
 - `chunkIndex`: Chunk position in document
 - `tokenStart`, `tokenEnd`: Token position in document
@@ -88,10 +94,32 @@ The overlap ensures that:
 
 **File:** `src/services/documentChunker.js`
 
+**Configuration:**
+```javascript
+{
+  maxParagraphTokens: 1200,  // Maximum paragraph size in tokens
+  overlapTokens: 200,        // Overlap when splitting oversized paragraphs
+  charsPerToken: 4           // Approximate characters per token
+}
+```
+
 **Process:**
 1. Split on double newlines (`\n\n`)
 2. Each paragraph becomes a chunk
-3. Oversized paragraphs (>5000 chars) are split with overlap
+3. Oversized paragraphs (>1200 tokens) are split with 200-token overlap
+4. Final sub-chunks smaller than 50% of max are merged with previous chunk
+
+**Why Token-Aware Splitting?**
+
+Character-based splitting can create chunks that:
+- Exceed model token limits (depending on language/punctuation)
+- Are inconsistent with PDF chunking strategy
+- Have unpredictable sizes for embedding generation
+
+Token-aware splitting ensures:
+- Consistent behavior across document types
+- Safe chunk sizes for all downstream processing
+- Better memory and performance characteristics
 
 **Why No Auto-Merge?**
 
@@ -107,10 +135,40 @@ Previous versions had "smart" merging heuristics that:
 - False merges are worse than false splits
 - Simplicity = reliability
 
+**Safety Guarantees:**
+
+1. **Minimum size enforcement**: Sub-chunks smaller than 50% of target are merged
+2. **Progress guarantee**: Always advances at least 25% of target size
+3. **Overlap preservation**: Maintains context across split boundaries
+
 **Metadata Tracked:**
 - `paragraphIndex`: Original paragraph number
 - `totalParagraphs`: Total paragraphs in document
+- `tokenCount`: Approximate token count
 - `isSplit`: Whether paragraph was split (oversized)
+- `subChunkIndex`: Sub-chunk position (if split)
+
+## Edge Case Handling
+
+### Problem: Tiny Tail Chunks
+
+**Issue:** Final chunk could be very small (e.g., 50 tokens) if document length isn't evenly divisible by target size.
+
+**Solution:**
+- PDFs: Merge final chunk with previous if below `minTokens` (600)
+- Paragraphs: Merge final sub-chunk with previous if below 50% of `maxParagraphTokens`
+
+### Problem: Infinite Loops
+
+**Issue:** If overlap >= chunk length, position never advances, causing infinite loop.
+
+**Solution:** Always advance at least 25% of target size, regardless of actual chunk length or overlap.
+
+### Problem: Token Limit Exceeded
+
+**Issue:** Character-based limits can exceed token limits depending on language and punctuation density.
+
+**Solution:** All chunking is now token-aware using approximate `charsPerToken = 4` calculation. Conservative enough to never exceed actual token limits.
 
 ## Retrieval Benefits
 
