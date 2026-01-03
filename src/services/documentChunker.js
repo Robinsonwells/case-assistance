@@ -12,7 +12,7 @@ export default class DocumentChunker {
   /**
    * Simple paragraph-based chunking
    * Splits document by paragraph boundaries only (double newlines)
-   * 
+   *
    * @param {string} text - Raw document text to chunk
    * @returns {array} - Array of paragraph chunk objects
    */
@@ -20,43 +20,96 @@ export default class DocumentChunker {
     try {
       const chunks = []
 
-      // Validate input
       if (!text || typeof text !== 'string') {
         console.warn('Invalid text input for chunkByParagraph')
         return chunks
       }
 
-      // Clean up text
       const cleanText = text.trim()
       if (cleanText.length === 0) {
         return chunks
       }
 
-      // Split ONLY by double newlines (paragraph boundaries)
       const paragraphs = cleanText
         .split(/\n\s*\n+/)
         .map(p => p.trim())
         .filter(p => p.length > 0)
 
-      // One paragraph = one chunk, no exceptions
-      paragraphs.forEach((paragraph, idx) => {
+      const mergedParagraphs = this._mergeHeadingsWithContent(paragraphs)
+
+      mergedParagraphs.forEach((paragraph, idx) => {
         chunks.push({
           id: `para_${idx}`,
           text: paragraph,
           type: 'paragraph',
           metadata: {
             paragraph: idx,
-            paragraphCount: paragraphs.length
+            paragraphCount: mergedParagraphs.length
           }
         })
       })
 
-      console.log(`✓ Created ${chunks.length} paragraph chunks`)
+      console.log(`✓ Created ${chunks.length} paragraph chunks (merged from ${paragraphs.length} raw paragraphs)`)
       return chunks
     } catch (err) {
       console.error('Error in chunkByParagraph:', err)
       return []
     }
+  }
+
+  /**
+   * Merge orphaned section headings with following content
+   * @private
+   * @param {Array<string>} paragraphs - Raw paragraphs
+   * @returns {Array<string>} - Merged paragraphs
+   */
+  _mergeHeadingsWithContent(paragraphs) {
+    const merged = []
+    let i = 0
+
+    while (i < paragraphs.length) {
+      const para = paragraphs[i]
+
+      const isHeading = this._isHeadingLike(para)
+
+      if (isHeading && i + 1 < paragraphs.length) {
+        const nextPara = paragraphs[i + 1]
+        merged.push(`${para}\n\n${nextPara}`)
+        i += 2
+      } else {
+        merged.push(para)
+        i++
+      }
+    }
+
+    return merged
+  }
+
+  /**
+   * Check if a paragraph looks like a heading
+   * @private
+   * @param {string} text - Text to check
+   * @returns {boolean} - True if looks like a heading
+   */
+  _isHeadingLike(text) {
+    if (!text || text.length === 0) return false
+
+    if (text.length > 100) return false
+
+    if (/^[A-Z\s]+$/.test(text) && text.length < 50) {
+      return true
+    }
+
+    if (/^[A-Z][A-Za-z\s]+$/.test(text) && text.length < 80 && !/[.!?]$/.test(text)) {
+      return true
+    }
+
+    const romanNumeralPattern = /^[IVX]+\.\s+[A-Z]/
+    if (romanNumeralPattern.test(text) && text.length < 80) {
+      return true
+    }
+
+    return false
   }
 
   /**

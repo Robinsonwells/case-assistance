@@ -17,8 +17,7 @@ export default class PDFExtractor {
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 
-      const allChunks = []
-      let globalParagraphIndex = 0
+      const allParagraphs = []
 
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
@@ -26,23 +25,32 @@ export default class PDFExtractor {
 
         const paragraphs = this._extractParagraphs(textContent.items)
 
-        paragraphs.forEach((paragraphText, pageParaIndex) => {
-          allChunks.push({
-            id: `page${pageNum}_para${pageParaIndex}`,
+        paragraphs.forEach((paragraphText) => {
+          allParagraphs.push({
             text: paragraphText,
-            type: 'paragraph',
-            metadata: {
-              page: pageNum,
-              paragraph: globalParagraphIndex,
-              pageParaIndex: pageParaIndex,
-              totalPages: pdf.numPages
-            }
+            page: pageNum,
+            totalPages: pdf.numPages
           })
-          globalParagraphIndex++
         })
       }
 
-      console.log(`✓ Extracted ${allChunks.length} paragraphs from ${pdf.numPages} pages`)
+      const filteredParagraphs = this._filterRepeatingElements(allParagraphs)
+
+      const allChunks = []
+      filteredParagraphs.forEach((para, globalIndex) => {
+        allChunks.push({
+          id: `page${para.page}_para${globalIndex}`,
+          text: para.text,
+          type: 'paragraph',
+          metadata: {
+            page: para.page,
+            paragraph: globalIndex,
+            totalPages: para.totalPages
+          }
+        })
+      })
+
+      console.log(`✓ Extracted ${allChunks.length} paragraphs from ${pdf.numPages} pages (filtered from ${allParagraphs.length})`)
       return allChunks
     } catch (err) {
       console.error('Error extracting PDF text:', err)
@@ -60,21 +68,64 @@ export default class PDFExtractor {
       const arrayBuffer = await file.arrayBuffer()
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
 
-      const textPages = []
+      const allParagraphs = []
 
       for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
         const page = await pdf.getPage(pageNum)
         const textContent = await page.getTextContent()
 
-        const pageText = this._reconstructPageLayout(textContent.items)
-        textPages.push(pageText)
+        const paragraphs = this._extractParagraphs(textContent.items)
+        paragraphs.forEach(p => {
+          allParagraphs.push({ text: p, page: pageNum })
+        })
       }
 
-      return textPages.join('\n\n')
+      const filteredParagraphs = this._filterRepeatingElements(allParagraphs)
+      const text = filteredParagraphs.map(p => p.text).join('\n\n')
+
+      return this._normalizeHyphenation(text)
     } catch (err) {
       console.error('Error extracting PDF text:', err)
       throw new Error(`Failed to extract PDF text: ${err.message}`)
     }
+  }
+
+  /**
+   * Filter out repeating elements (headers/footers)
+   * @private
+   * @param {Array} paragraphs - Array of paragraph objects with text and page
+   * @returns {Array} - Filtered paragraphs
+   */
+  _filterRepeatingElements(paragraphs) {
+    const paragraphCounts = {}
+
+    paragraphs.forEach(p => {
+      const normalized = p.text.trim().toLowerCase()
+      paragraphCounts[normalized] = (paragraphCounts[normalized] || 0) + 1
+    })
+
+    const filtered = paragraphs.filter(p => {
+      const normalized = p.text.trim().toLowerCase()
+      const count = paragraphCounts[normalized]
+
+      if (count >= 3 && p.text.length < 200) {
+        return false
+      }
+
+      return true
+    })
+
+    return filtered
+  }
+
+  /**
+   * Normalize hyphenation across line breaks
+   * @private
+   * @param {string} text - Text with potential hyphenation issues
+   * @returns {string} - Text with normalized hyphenation
+   */
+  _normalizeHyphenation(text) {
+    return text.replace(/(\w+)-\s+(\w+)/g, '$1$2')
   }
 
   /**
@@ -155,24 +206,39 @@ export default class PDFExtractor {
       leftMargin = xPositions[Math.floor(xPositions.length * 0.1)]
     }
 
+    const isBulletLine = (text) => {
+      return /^[•\-\*\u2022\u2023\u2043\u25E6\u2219\u2013\u2014]\s/.test(text.trim()) ||
+             /^\d+\.\s/.test(text.trim())
+    }
+
     const paragraphs = []
     let currentParagraph = []
+    let inBulletList = false
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
       const prevLine = i > 0 ? lines[i - 1] : null
+      const isBullet = isBulletLine(line.text)
 
       let isNewParagraph = false
 
       if (prevLine) {
         const yGap = Math.abs(prevLine.y - line.y)
-        if (yGap > typicalLineHeight * 1.8) {
-          isNewParagraph = true
-        }
 
-        const xIndent = line.x - leftMargin
-        if (xIndent > 15 && yGap > typicalLineHeight * 0.8) {
+        if (isBullet) {
+          inBulletList = true
+          isNewParagraph = false
+        } else if (inBulletList && yGap <= typicalLineHeight * 1.8) {
+          isNewParagraph = false
+        } else if (yGap > typicalLineHeight * 1.8) {
           isNewParagraph = true
+          inBulletList = false
+        } else {
+          const xIndent = line.x - leftMargin
+          if (xIndent > 15 && yGap > typicalLineHeight * 0.8) {
+            isNewParagraph = true
+            inBulletList = false
+          }
         }
       }
 
@@ -191,16 +257,4 @@ export default class PDFExtractor {
     return paragraphs.filter(p => p.length > 0)
   }
 
-  /**
-   * Reconstruct page layout by detecting line breaks based on Y-position changes
-   * This preserves paragraph structure in the extracted text
-   *
-   * @private
-   * @param {array} items - Text items from PDF.js getTextContent()
-   * @returns {string} - Reconstructed text with proper line breaks
-   */
-  _reconstructPageLayout(items) {
-    const paragraphs = this._extractParagraphs(items)
-    return paragraphs.join('\n\n')
-  }
 }
