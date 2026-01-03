@@ -22,7 +22,12 @@ export default class ProjectManager {
     this.embeddingGenerator = new EmbeddingGenerator()
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
-    this.pdfExtractor = new PDFExtractor()
+    this.pdfExtractor = new PDFExtractor({
+      paragraphGapMultiplier: 3.0,
+      minParagraphLength: 30,
+      enableValidation: true,
+      enableAutoMerge: true
+    })
   }
 
   /**

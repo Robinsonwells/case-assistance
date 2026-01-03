@@ -7,6 +7,15 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
  * PDFExtractor - Extracts text content from PDF files
  */
 export default class PDFExtractor {
+  constructor(config = {}) {
+    this.config = {
+      paragraphGapMultiplier: config.paragraphGapMultiplier || 3.0,
+      minParagraphLength: config.minParagraphLength || 30,
+      enableValidation: config.enableValidation !== false,
+      enableAutoMerge: config.enableAutoMerge !== false
+    }
+  }
+
   /**
    * Extract text from a PDF file and return structured chunks
    * @param {File} file - PDF file to extract text from
@@ -208,12 +217,16 @@ export default class PDFExtractor {
 
     const isBulletLine = (text) => {
       return /^[•\-\*\u2022\u2023\u2043\u25E6\u2219\u2013\u2014]\s/.test(text.trim()) ||
-             /^\d+\.\s/.test(text.trim())
+             /^\d+\.\s/.test(text.trim()) ||
+             /^[a-z]\)\s/.test(text.trim()) ||
+             /^[A-Z]\.\s/.test(text.trim())
     }
 
     const paragraphs = []
     let currentParagraph = []
+    let bulletBlock = []
     let inBulletList = false
+    let bulletListStartIndex = -1
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
@@ -224,21 +237,23 @@ export default class PDFExtractor {
 
       if (prevLine) {
         const yGap = Math.abs(prevLine.y - line.y)
+        const paragraphGapThreshold = typicalLineHeight * this.config.paragraphGapMultiplier
 
         if (isBullet) {
-          inBulletList = true
+          if (!inBulletList) {
+            bulletListStartIndex = i
+            inBulletList = true
+          }
           isNewParagraph = false
-        } else if (inBulletList && yGap <= typicalLineHeight * 1.8) {
-          isNewParagraph = false
-        } else if (yGap > typicalLineHeight * 1.8) {
-          isNewParagraph = true
-          inBulletList = false
-        } else {
-          const xIndent = line.x - leftMargin
-          if (xIndent > 15 && yGap > typicalLineHeight * 0.8) {
+        } else if (inBulletList) {
+          if (yGap <= typicalLineHeight * 2.0) {
+            isNewParagraph = false
+          } else {
             isNewParagraph = true
             inBulletList = false
           }
+        } else if (yGap > paragraphGapThreshold) {
+          isNewParagraph = true
         }
       }
 
@@ -254,7 +269,84 @@ export default class PDFExtractor {
       paragraphs.push(currentParagraph.join(' ').trim())
     }
 
-    return paragraphs.filter(p => p.length > 0)
+    const validatedParagraphs = this._validateAndMergeParagraphs(paragraphs)
+    return validatedParagraphs
+  }
+
+  /**
+   * Validate paragraphs and merge broken ones
+   * @private
+   * @param {Array<string>} paragraphs - Array of paragraph texts
+   * @returns {Array<string>} - Validated and merged paragraphs
+   */
+  _validateAndMergeParagraphs(paragraphs) {
+    if (!this.config.enableValidation || paragraphs.length === 0) {
+      return paragraphs
+    }
+
+    const merged = []
+    let buffer = ''
+
+    for (let i = 0; i < paragraphs.length; i++) {
+      const para = paragraphs[i]
+
+      if (buffer.length === 0) {
+        buffer = para
+      } else {
+        buffer += ' ' + para
+      }
+
+      const shouldContinue = this._shouldMergeWithNext(buffer, i < paragraphs.length - 1 ? paragraphs[i + 1] : null)
+
+      if (!shouldContinue) {
+        merged.push(buffer)
+        buffer = ''
+      }
+    }
+
+    if (buffer.length > 0) {
+      merged.push(buffer)
+    }
+
+    return merged.filter(p => p.length > 0)
+  }
+
+  /**
+   * Determine if current paragraph should merge with next
+   * @private
+   * @param {string} current - Current paragraph text
+   * @param {string|null} next - Next paragraph text (or null if last)
+   * @returns {boolean} - True if should merge with next
+   */
+  _shouldMergeWithNext(current, next) {
+    if (!next || !this.config.enableAutoMerge) {
+      return false
+    }
+
+    const endsWithPunctuation = /[.!?"]$/.test(current.trim())
+    const nextStartsLowercase = /^[a-z]/.test(next.trim())
+    const isTooShort = current.length < this.config.minParagraphLength
+    const endsWithContinuation = /[,;:]$/.test(current.trim())
+    const endsWithOpenParen = /\([^)]*$/.test(current)
+    const nextStartsCloseParen = /^\)/.test(next.trim())
+
+    if (!endsWithPunctuation && nextStartsLowercase) {
+      return true
+    }
+
+    if (nextStartsCloseParen || endsWithOpenParen) {
+      return true
+    }
+
+    if (isTooShort && !endsWithPunctuation) {
+      return true
+    }
+
+    if (endsWithContinuation) {
+      return true
+    }
+
+    return false
   }
 
 }
