@@ -89,23 +89,6 @@ export default class PDFExtractor {
       }
 
       currentParagraph.push(line)
-
-      const nextLine = lines[i + 1]
-      if (!nextLine) {
-        continue
-      }
-
-      const trimmedLine = line.trim()
-      const endsWithPunctuation = /[.!?]$/.test(trimmedLine)
-      const endsWithAbbreviation = /\b(Dr|Mr|Ms|Mrs|Prof|Sr|Jr|Inc|Ltd|Co|Corp|vs|No|Fig|Vol|etc|St|Ave|Dept|Esq|Hon|Rev|Admin|Supp|Cir|App|pg)\.$/.test(trimmedLine)
-      const nextStartsWithCapital = /^[A-Z]/.test(nextLine.trim())
-      const isShortLine = line.length < 80
-      const isHeader = /^[A-Z\s_-]+$/.test(trimmedLine) && line.length < 100
-
-      if (isHeader || (endsWithPunctuation && !endsWithAbbreviation && nextStartsWithCapital && isShortLine)) {
-        paragraphs.push(currentParagraph.join(' '))
-        currentParagraph = []
-      }
     }
 
     if (currentParagraph.length > 0) {
