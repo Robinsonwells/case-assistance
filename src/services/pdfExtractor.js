@@ -8,7 +8,50 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
  */
 export default class PDFExtractor {
   /**
-   * Extract text from a PDF file
+   * Extract text from a PDF file and return structured chunks
+   * @param {File} file - PDF file to extract text from
+   * @returns {Promise<Array>} - Array of paragraph chunks with page metadata
+   */
+  async extractTextAsChunks(file) {
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+      const allChunks = []
+      let globalParagraphIndex = 0
+
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        const textContent = await page.getTextContent()
+
+        const paragraphs = this._extractParagraphs(textContent.items)
+
+        paragraphs.forEach((paragraphText, pageParaIndex) => {
+          allChunks.push({
+            id: `page${pageNum}_para${pageParaIndex}`,
+            text: paragraphText,
+            type: 'paragraph',
+            metadata: {
+              page: pageNum,
+              paragraph: globalParagraphIndex,
+              pageParaIndex: pageParaIndex,
+              totalPages: pdf.numPages
+            }
+          })
+          globalParagraphIndex++
+        })
+      }
+
+      console.log(`✓ Extracted ${allChunks.length} paragraphs from ${pdf.numPages} pages`)
+      return allChunks
+    } catch (err) {
+      console.error('Error extracting PDF text:', err)
+      throw new Error(`Failed to extract PDF text: ${err.message}`)
+    }
+  }
+
+  /**
+   * Extract text from a PDF file (legacy method - returns plain text)
    * @param {File} file - PDF file to extract text from
    * @returns {Promise<string>} - Extracted text content
    */
@@ -27,11 +70,79 @@ export default class PDFExtractor {
         textPages.push(pageText)
       }
 
-      return textPages.join('\n')
+      return textPages.join('\n\n')
     } catch (err) {
       console.error('Error extracting PDF text:', err)
       throw new Error(`Failed to extract PDF text: ${err.message}`)
     }
+  }
+
+  /**
+   * Extract paragraphs from PDF text items
+   * @private
+   * @param {array} items - Text items from PDF.js getTextContent()
+   * @returns {Array<string>} - Array of paragraph texts
+   */
+  _extractParagraphs(items) {
+    if (!items || items.length === 0) {
+      return []
+    }
+
+    const lines = []
+    let currentLine = []
+    let currentY = items[0].transform[5]
+    const lineHeightThreshold = 2
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const itemY = item.transform[5]
+      const yDiff = Math.abs(itemY - currentY)
+
+      if (yDiff > lineHeightThreshold) {
+        if (currentLine.length > 0) {
+          lines.push(currentLine.join(' ').trim())
+          currentLine = []
+        }
+        currentY = itemY
+      }
+
+      if (item.str.trim().length > 0) {
+        currentLine.push(item.str)
+      }
+    }
+
+    if (currentLine.length > 0) {
+      lines.push(currentLine.join(' ').trim())
+    }
+
+    const paragraphs = []
+    let currentParagraph = []
+    let previousY = null
+    const paragraphGapThreshold = 15
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      const itemY = item.transform[5]
+
+      if (previousY !== null) {
+        const yGap = Math.abs(previousY - itemY)
+        if (yGap > paragraphGapThreshold && currentParagraph.length > 0) {
+          paragraphs.push(currentParagraph.join(' ').trim())
+          currentParagraph = []
+        }
+      }
+
+      if (item.str.trim().length > 0) {
+        currentParagraph.push(item.str)
+      }
+      previousY = itemY
+    }
+
+    if (currentParagraph.length > 0) {
+      paragraphs.push(currentParagraph.join(' ').trim())
+    }
+
+    return paragraphs.filter(p => p.length > 0)
   }
 
   /**

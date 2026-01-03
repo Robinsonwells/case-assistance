@@ -164,17 +164,15 @@ export default class ProjectManager {
         throw new Error('No file provided')
       }
 
-      // Extract text based on file type
-      let fileText
+      // Extract and chunk based on file type
+      let chunks
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        console.log('Extracting text from PDF...')
-        fileText = await this.pdfExtractor.extractText(file)
+        console.log('Extracting paragraphs from PDF...')
+        chunks = await this.pdfExtractor.extractTextAsChunks(file)
       } else {
-        fileText = await file.text()
+        const fileText = await file.text()
+        chunks = this.chunker.chunkByParagraph(fileText)
       }
-
-      // Chunk the document
-    const chunks = this.chunker.chunkByParagraph(fileText)
 
 
       // Validate chunks for quality issues
