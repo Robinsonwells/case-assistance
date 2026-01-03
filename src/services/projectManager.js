@@ -174,7 +174,8 @@ export default class ProjectManager {
       }
 
       // Chunk the document
-      const chunks = this.chunker.chunkHybrid(fileText)
+    const chunks = this.chunker.chunkByParagraph(fileText)
+
 
       // Validate chunks for quality issues
       const validationReport = this.chunker.getChunkValidationReport(chunks)
