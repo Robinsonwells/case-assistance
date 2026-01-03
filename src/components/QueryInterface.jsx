@@ -1,78 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState } from 'react'
 
 export default function QueryInterface({ projectManager, projectName }) {
   const [question, setQuestion] = useState('')
   const [answer, setAnswer] = useState(null)
-  const [queryQueue, setQueryQueue] = useState([])
-  const [isProcessing, setIsProcessing] = useState(false)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [queriesHistory, setQueriesHistory] = useState([])
-  const processingRef = useRef(false)
-
-  // Process query queue
-  useEffect(() => {
-    const processQueue = async () => {
-      if (processingRef.current || queryQueue.length === 0) {
-        return
-      }
-
-      processingRef.current = true
-      setIsProcessing(true)
-
-      const currentQuery = queryQueue[0]
-
-      try {
-        const result = await projectManager.queryProject(currentQuery.question)
-
-        // Set answer
-        setAnswer({
-          text: result.answer,
-          sourcesCount: result.relevantChunks?.length || 0,
-          timestamp: new Date().toLocaleTimeString()
-        })
-
-        // Add to history
-        setQueriesHistory(prev => [
-          {
-            id: Date.now(),
-            question: currentQuery.question,
-            answer: result.answer,
-            sourcesCount: result.relevantChunks?.length || 0,
-            timestamp: new Date().toLocaleString(),
-            status: 'completed'
-          },
-          ...prev
-        ])
-
-        setError('')
-      } catch (err) {
-        console.error('Query error:', err)
-        setError(err.message || 'Failed to query documents. Please try again.')
-        setAnswer(null)
-
-        // Add failed query to history
-        setQueriesHistory(prev => [
-          {
-            id: Date.now(),
-            question: currentQuery.question,
-            answer: 'Failed to process query',
-            sourcesCount: 0,
-            timestamp: new Date().toLocaleString(),
-            status: 'failed',
-            error: err.message
-          },
-          ...prev
-        ])
-      }
-
-      // Remove processed query from queue
-      setQueryQueue(prev => prev.slice(1))
-      processingRef.current = false
-      setIsProcessing(false)
-    }
-
-    processQueue()
-  }, [queryQueue, projectManager])
 
   const handleQuery = async () => {
     if (!question.trim()) {
@@ -80,18 +13,41 @@ export default function QueryInterface({ projectManager, projectName }) {
       return
     }
 
-    const questionText = question.trim()
-    setQuestion('')
-    setError('')
+    try {
+      setError('')
+      setLoading(true)
+      setAnswer(null)
 
-    // Add to queue
-    setQueryQueue(prev => [
-      ...prev,
-      {
-        question: questionText,
-        id: Date.now()
-      }
-    ])
+      // Query the project
+      const result = await projectManager.queryProject(question)
+
+      // Set answer
+      setAnswer({
+        text: result.answer,
+        sourcesCount: result.relevantChunks?.length || 0,
+        timestamp: new Date().toLocaleTimeString()
+      })
+
+      // Add to history
+      setQueriesHistory(prev => [
+        {
+          id: Date.now(),
+          question: question.trim(),
+          answer: result.answer,
+          sourcesCount: result.relevantChunks?.length || 0,
+          timestamp: new Date().toLocaleString()
+        },
+        ...prev
+      ])
+
+      setQuestion('')
+    } catch (err) {
+      console.error('Query error:', err)
+      setError(err.message || 'Failed to query documents. Please try again.')
+      setAnswer(null)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleKeyDown = (e) => {
@@ -140,26 +96,12 @@ export default function QueryInterface({ projectManager, projectName }) {
           placeholder="e.g., What are the key dates mentioned in the documents?"
           className="w-full px-4 py-3 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30 transition-all resize-none"
           rows="4"
+          disabled={loading}
         />
         <p className="text-xs text-slate-400">
-          Tip: Ask specific questions for better results. Use Ctrl+Enter to submit.{queryQueue.length > 0 ? ' Queries are processed in order.' : ''}
+          Tip: Ask specific questions for better results. Use Ctrl+Enter to submit.
         </p>
       </div>
-
-      {/* Queue status */}
-      {queryQueue.length > 0 && (
-        <div className="p-3 bg-blue-900/30 border border-blue-700/50 rounded-lg">
-          <div className="flex items-center gap-2 text-sm text-blue-300">
-            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <span>
-              Processing {queryQueue.length} {queryQueue.length === 1 ? 'query' : 'queries'}...
-            </span>
-          </div>
-        </div>
-      )}
 
       {/* Error message */}
       {error && (
@@ -179,13 +121,22 @@ export default function QueryInterface({ projectManager, projectName }) {
       {/* Ask button */}
       <button
         onClick={handleQuery}
-        disabled={!question.trim()}
+        disabled={loading || !question.trim()}
         className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2"
       >
-        <span>Ask AI</span>
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
+        {loading ? (
+          <>
+            <span className="inline-block w-4 h-4 border-2 border-slate-300 border-t-white rounded-full animate-spin"></span>
+            Processing...
+          </>
+        ) : (
+          <>
+            <span>Ask AI</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </>
+        )}
       </button>
 
       {/* Answer section */}
