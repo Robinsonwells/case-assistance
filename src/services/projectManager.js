@@ -23,8 +23,8 @@ export default class ProjectManager {
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
     this.pdfExtractor = new PDFExtractor({
-      paragraphGapMultiplier: 3.0,
-      minParagraphLength: 30,
+      paragraphGapMultiplier: 2.5,
+      minParagraphLength: 100,
       enableValidation: true,
       enableAutoMerge: true
     })

@@ -9,8 +9,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 export default class PDFExtractor {
   constructor(config = {}) {
     this.config = {
-      paragraphGapMultiplier: config.paragraphGapMultiplier || 3.0,
-      minParagraphLength: config.minParagraphLength || 30,
+      paragraphGapMultiplier: config.paragraphGapMultiplier || 2.5,
+      minParagraphLength: config.minParagraphLength || 100,
       enableValidation: config.enableValidation !== false,
       enableAutoMerge: config.enableAutoMerge !== false
     }
@@ -148,6 +148,8 @@ export default class PDFExtractor {
       return []
     }
 
+    console.log(`Processing ${items.length} text items from PDF...`)
+
     const sortedItems = [...items].sort((a, b) => {
       const yDiff = b.transform[5] - a.transform[5]
       if (Math.abs(yDiff) > 3) return yDiff
@@ -190,6 +192,8 @@ export default class PDFExtractor {
       })
     }
 
+    console.log(`Extracted ${lines.length} lines from PDF`)
+
     if (lines.length === 0) {
       return []
     }
@@ -207,6 +211,8 @@ export default class PDFExtractor {
       lineGaps.sort((a, b) => a - b)
       typicalLineHeight = lineGaps[Math.floor(lineGaps.length / 2)]
     }
+
+    console.log(`Typical line height: ${typicalLineHeight}px`)
 
     const xPositions = lines.map(l => l.x).filter(x => x !== Infinity)
     let leftMargin = 0
@@ -269,7 +275,14 @@ export default class PDFExtractor {
       paragraphs.push(currentParagraph.join(' ').trim())
     }
 
+    console.log(`Initial paragraphs extracted: ${paragraphs.length}`)
+    console.log(`Average paragraph length: ${Math.round(paragraphs.reduce((sum, p) => sum + p.length, 0) / paragraphs.length)} chars`)
+
     const validatedParagraphs = this._validateAndMergeParagraphs(paragraphs)
+    
+    console.log(`Final paragraphs after validation: ${validatedParagraphs.length}`)
+    console.log(`Average final paragraph length: ${Math.round(validatedParagraphs.reduce((sum, p) => sum + p.length, 0) / validatedParagraphs.length)} chars`)
+    
     return validatedParagraphs
   }
 
@@ -329,6 +342,8 @@ export default class PDFExtractor {
     const endsWithContinuation = /[,;:]$/.test(current.trim())
     const endsWithOpenParen = /\([^)]*$/.test(current)
     const nextStartsCloseParen = /^\)/.test(next.trim())
+    const endsWithIncompletePhrase = /\b(Dr|Mr|Mrs|Ms|Inc|Corp|Ltd|LLC|Admin|R|U|S|C|F|vs|v|etc|No|Vol|Ed)\.$/.test(current.trim())
+    const endsWithDangling = /\b(and|or|the|a|an|to|of|in|for|with|at|by|from|as)$/.test(current.trim())
 
     if (!endsWithPunctuation && nextStartsLowercase) {
       return true
@@ -346,6 +361,13 @@ export default class PDFExtractor {
       return true
     }
 
+    if (endsWithIncompletePhrase) {
+      return true
+    }
+
+    if (endsWithDangling) {
+      return true
+    }
     return false
   }
 

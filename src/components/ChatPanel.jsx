@@ -66,7 +66,7 @@ function SourcesExpander({ sources }) {
         <span>{sources.length} sources</span>
       </button>
       {showSources && (
-        <div className="mt-2 space-y-2 max-h-96 overflow-y-auto">
+        <div className="mt-2 space-y-2 max-h-[600px] overflow-y-auto">
           {sources.map((chunk, index) => (
             <div key={index} className="p-3 bg-slate-800/50 rounded text-xs">
               <div className="flex items-center gap-2 mb-2 text-slate-400">
@@ -75,10 +75,11 @@ function SourcesExpander({ sources }) {
                 </svg>
                 <span className="font-medium">{chunk.fileName}</span>
                 <span className="text-slate-500">• Similarity: {(chunk.similarity * 100).toFixed(1)}%</span>
+                <span className="text-slate-500">• Length: {chunk.content.length} chars</span>
               </div>
-              <p className="text-slate-300 whitespace-pre-wrap break-words leading-relaxed">
+              <div className="text-slate-300 whitespace-pre-wrap break-words leading-relaxed max-h-none">
                 {chunk.content}
-              </p>
+              </div>
             </div>
           ))}
         </div>
