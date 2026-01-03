@@ -27,7 +27,7 @@ export default class PDFExtractor {
         textPages.push(pageText)
       }
 
-      return textPages.join('\n\n')
+      return textPages.join('\n')
     } catch (err) {
       console.error('Error extracting PDF text:', err)
       throw new Error(`Failed to extract PDF text: ${err.message}`)
