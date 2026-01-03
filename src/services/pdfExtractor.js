@@ -88,55 +88,100 @@ export default class PDFExtractor {
       return []
     }
 
-    const lines = []
-    let currentLine = { text: [], y: items[0].transform[5] }
-    const lineHeightThreshold = 2
+    const sortedItems = [...items].sort((a, b) => {
+      const yDiff = b.transform[5] - a.transform[5]
+      if (Math.abs(yDiff) > 3) return yDiff
+      return a.transform[4] - b.transform[4]
+    })
 
-    for (const item of items) {
+    const lines = []
+    let currentLine = { textItems: [], y: sortedItems[0].transform[5], minX: Infinity }
+    const sameLineThreshold = 3
+
+    for (const item of sortedItems) {
       const itemY = item.transform[5]
+      const itemX = item.transform[4]
       const yDiff = Math.abs(itemY - currentLine.y)
 
-      if (yDiff > lineHeightThreshold) {
-        if (currentLine.text.length > 0) {
+      if (yDiff > sameLineThreshold) {
+        if (currentLine.textItems.length > 0) {
+          currentLine.textItems.sort((a, b) => a.x - b.x)
           lines.push({
-            text: currentLine.text.join(' ').trim(),
-            y: currentLine.y
+            text: currentLine.textItems.map(t => t.str).join(' ').trim(),
+            y: currentLine.y,
+            x: currentLine.minX
           })
         }
-        currentLine = { text: [], y: itemY }
+        currentLine = { textItems: [], y: itemY, minX: Infinity }
       }
 
       if (item.str.trim().length > 0) {
-        currentLine.text.push(item.str)
+        currentLine.textItems.push({ str: item.str, x: itemX })
+        currentLine.minX = Math.min(currentLine.minX, itemX)
       }
     }
 
-    if (currentLine.text.length > 0) {
+    if (currentLine.textItems.length > 0) {
+      currentLine.textItems.sort((a, b) => a.x - b.x)
       lines.push({
-        text: currentLine.text.join(' ').trim(),
-        y: currentLine.y
+        text: currentLine.textItems.map(t => t.str).join(' ').trim(),
+        y: currentLine.y,
+        x: currentLine.minX
       })
+    }
+
+    if (lines.length === 0) {
+      return []
+    }
+
+    const lineGaps = []
+    for (let i = 1; i < lines.length; i++) {
+      const gap = Math.abs(lines[i - 1].y - lines[i].y)
+      if (gap > 0 && gap < 50) {
+        lineGaps.push(gap)
+      }
+    }
+
+    let typicalLineHeight = 12
+    if (lineGaps.length > 0) {
+      lineGaps.sort((a, b) => a - b)
+      typicalLineHeight = lineGaps[Math.floor(lineGaps.length / 2)]
+    }
+
+    const xPositions = lines.map(l => l.x).filter(x => x !== Infinity)
+    let leftMargin = 0
+    if (xPositions.length > 0) {
+      xPositions.sort((a, b) => a - b)
+      leftMargin = xPositions[Math.floor(xPositions.length * 0.1)]
     }
 
     const paragraphs = []
     let currentParagraph = []
-    let previousY = null
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
+      const prevLine = i > 0 ? lines[i - 1] : null
 
-      if (previousY !== null) {
-        const yGap = Math.abs(previousY - line.y)
-        const avgLineHeight = i > 0 ? Math.abs(lines[i-1].y - line.y) : 12
+      let isNewParagraph = false
 
-        if (yGap > avgLineHeight * 1.5 && currentParagraph.length > 0) {
-          paragraphs.push(currentParagraph.join(' ').trim())
-          currentParagraph = []
+      if (prevLine) {
+        const yGap = Math.abs(prevLine.y - line.y)
+        if (yGap > typicalLineHeight * 1.8) {
+          isNewParagraph = true
+        }
+
+        const xIndent = line.x - leftMargin
+        if (xIndent > 15 && yGap > typicalLineHeight * 0.8) {
+          isNewParagraph = true
         }
       }
 
+      if (isNewParagraph && currentParagraph.length > 0) {
+        paragraphs.push(currentParagraph.join(' ').trim())
+        currentParagraph = []
+      }
+
       currentParagraph.push(line.text)
-      previousY = line.y
     }
 
     if (currentParagraph.length > 0) {
@@ -155,58 +200,7 @@ export default class PDFExtractor {
    * @returns {string} - Reconstructed text with proper line breaks
    */
   _reconstructPageLayout(items) {
-    if (!items || items.length === 0) {
-      return ''
-    }
-
-    const lines = []
-    let currentLine = []
-    let currentY = items[0].transform[5]
-    const lineHeightThreshold = 2
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      const itemY = item.transform[5]
-      const yDiff = Math.abs(itemY - currentY)
-
-      if (yDiff > lineHeightThreshold) {
-        if (currentLine.length > 0) {
-          lines.push(currentLine.join(' ').trim())
-          currentLine = []
-        }
-        currentY = itemY
-      }
-
-      if (item.str.trim().length > 0) {
-        currentLine.push(item.str)
-      }
-    }
-
-    if (currentLine.length > 0) {
-      lines.push(currentLine.join(' ').trim())
-    }
-
-    const paragraphs = []
-    let currentParagraph = []
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-
-      if (line.trim().length === 0) {
-        if (currentParagraph.length > 0) {
-          paragraphs.push(currentParagraph.join(' '))
-          currentParagraph = []
-        }
-        continue
-      }
-
-      currentParagraph.push(line)
-    }
-
-    if (currentParagraph.length > 0) {
-      paragraphs.push(currentParagraph.join(' '))
-    }
-
+    const paragraphs = this._extractParagraphs(items)
     return paragraphs.join('\n\n')
   }
 }
