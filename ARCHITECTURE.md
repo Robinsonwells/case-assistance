@@ -207,7 +207,7 @@ Component (user types question)
   ↓
 QueryInterface triggers search
   ├→ RAGRetriever.retrieveChunks(question)
-  │   └→ Finds top 5 most relevant chunks
+  │   └→ Finds top 15 most relevant chunks
   ├→ PerplexityAPI.queryLLM(question, chunks)
   │   └→ Sends to Perplexity with context
   └→ Component displays answer
@@ -241,7 +241,7 @@ User Types Question
   3. Generate embedding for question
   4. Calculate cosine similarity for each chunk
   5. Rank chunks by similarity
-  6. Return top 5 chunks
+  6. Return top 15 chunks
       ↓
 [PerplexityAPI Service]
   7. Format prompt with question + chunks
@@ -391,14 +391,16 @@ text
           ↓
    Rank by Similarity Score
           ↓
-   Select Top-K Chunks (K=5)
-   
+   Select Top-K Chunks (K=15)
+
    Results:
    - Chunk 1: similarity=0.87, content="..."
    - Chunk 2: similarity=0.84, content="..."
    - Chunk 3: similarity=0.79, content="..."
    - Chunk 4: similarity=0.73, content="..."
    - Chunk 5: similarity=0.68, content="..."
+   - ... (10 more chunks with decreasing similarity)
+   - Chunk 15: similarity=0.52, content="..."
 
 3. AUGMENTATION PHASE
    Combine Question + Context
@@ -415,8 +417,8 @@ text
    │ - [Chunk 1]                         │
    │ - [Chunk 2]                         │
    │ - [Chunk 3]                         │
-   │ - [Chunk 4]                         │
-   │ - [Chunk 5]                         │
+   │ - ... (12 more chunks)              │
+   │ - [Chunk 15]                        │
    │                                      │
    │ Answer:                              │
    └─────────────────────────────────────┘
@@ -430,14 +432,14 @@ text
    
 5. OUTPUT
    - Answer: AI-generated response
-   - Sources: 5 chunks used
+   - Sources: 15 chunks used
    - Confidence: Based on similarity scores
 RAG Parameters
 Configurable Settings
 
 javascript
 const RAG_CONFIG = {
-  topK: 5,                           // Number of chunks to retrieve
+  topK: 15,                          // Number of chunks to retrieve
   minSimilarity: 0.5,                // Minimum relevance threshold
   chunkOverlap: 2,                   // Sentence overlap between chunks
   embeddingDimension: 768,           // Vector size

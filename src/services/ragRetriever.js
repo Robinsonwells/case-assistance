@@ -43,11 +43,11 @@ export default class RAGRetriever {
    *
    * @param {string} question - User's question
    * @param {array} chunks - Array of chunk objects with 'text' and 'embedding' property
-   * @param {number} topK - Number of top chunks to return (default: 10)
+   * @param {number} topK - Number of top chunks to return (default: 15)
    * @param {object} embeddingGenerator - EmbeddingGenerator instance (required)
    * @returns {Promise<array>} - Top K relevant chunks with scores, sorted by relevance
    */
-  async findRelevantChunks(question, chunks, topK = 10, embeddingGenerator = null) {
+  async findRelevantChunks(question, chunks, topK = 15, embeddingGenerator = null) {
     try {
       // Validate inputs
       if (!question || typeof question !== 'string') {
@@ -65,8 +65,8 @@ export default class RAGRetriever {
 
       // Validate topK
       if (typeof topK !== 'number' || topK < 1 || topK > 50) {
-        console.warn('topK should be between 1 and 50, defaulting to 10')
-        topK = 10
+        console.warn('topK should be between 1 and 50, defaulting to 15')
+        topK = 15
       }
 
       // Limit topK to available chunks

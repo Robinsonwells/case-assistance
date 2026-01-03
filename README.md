@@ -481,7 +481,7 @@ User Question
     ↓
 [RAGRetriever] Extract Keywords
     ↓ (Score document chunks by relevance)
-[Top K Chunks] (Usually 5 most relevant)
+[Top K Chunks] (15 most relevant)
     ↓
 [PerplexityAPI] Send Question + Context
     ↓ (sonar-reasoning-pro model)
