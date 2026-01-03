@@ -369,6 +369,12 @@ export default class ProjectManager {
         throw new Error('No documents found in project. Please upload some documents first.')
       }
 
+      // Initialize embedding generator if not already initialized
+      if (!this.embeddingGenerator.isInitialized()) {
+        console.log('Initializing embedding generator for first query...')
+        await this.embeddingGenerator.initialize()
+      }
+
       // Retrieve relevant chunks using RAG (semantic search)
       // Pass embeddingGenerator for semantic similarity
       const relevantChunks = await this.ragRetriever.findRelevantChunks(
