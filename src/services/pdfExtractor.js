@@ -89,53 +89,54 @@ export default class PDFExtractor {
     }
 
     const lines = []
-    let currentLine = []
-    let currentY = items[0].transform[5]
+    let currentLine = { text: [], y: items[0].transform[5] }
     const lineHeightThreshold = 2
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
+    for (const item of items) {
       const itemY = item.transform[5]
-      const yDiff = Math.abs(itemY - currentY)
+      const yDiff = Math.abs(itemY - currentLine.y)
 
       if (yDiff > lineHeightThreshold) {
-        if (currentLine.length > 0) {
-          lines.push(currentLine.join(' ').trim())
-          currentLine = []
+        if (currentLine.text.length > 0) {
+          lines.push({
+            text: currentLine.text.join(' ').trim(),
+            y: currentLine.y
+          })
         }
-        currentY = itemY
+        currentLine = { text: [], y: itemY }
       }
 
       if (item.str.trim().length > 0) {
-        currentLine.push(item.str)
+        currentLine.text.push(item.str)
       }
     }
 
-    if (currentLine.length > 0) {
-      lines.push(currentLine.join(' ').trim())
+    if (currentLine.text.length > 0) {
+      lines.push({
+        text: currentLine.text.join(' ').trim(),
+        y: currentLine.y
+      })
     }
 
     const paragraphs = []
     let currentParagraph = []
     let previousY = null
-    const paragraphGapThreshold = 15
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i]
-      const itemY = item.transform[5]
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
 
       if (previousY !== null) {
-        const yGap = Math.abs(previousY - itemY)
-        if (yGap > paragraphGapThreshold && currentParagraph.length > 0) {
+        const yGap = Math.abs(previousY - line.y)
+        const avgLineHeight = i > 0 ? Math.abs(lines[i-1].y - line.y) : 12
+
+        if (yGap > avgLineHeight * 1.5 && currentParagraph.length > 0) {
           paragraphs.push(currentParagraph.join(' ').trim())
           currentParagraph = []
         }
       }
 
-      if (item.str.trim().length > 0) {
-        currentParagraph.push(item.str)
-      }
-      previousY = itemY
+      currentParagraph.push(line.text)
+      previousY = line.y
     }
 
     if (currentParagraph.length > 0) {
