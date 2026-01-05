@@ -595,7 +595,7 @@ No purpose/need conflation occurred.
 
 Every statement is traceable to document text.
 
-Any unexplained gap is explicitly acknowledged.
+Any unexplained gap is explicitly acknowledged.“When the user asks for ‘preparation’ vs ‘publication,’ do not substitute NOA/publication dates unless the document explicitly equates them. If only NOA/publication is provided, answer with that and explicitly state that ‘preparation date is not stated.’”
 
       `
 
