@@ -21,10 +21,10 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       return
     }
 
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024
+    // Validate file size (max 10GB)
+    const maxSize = 10 * 1024 * 1024 * 1024
     if (file.size > maxSize) {
-      setError('File size exceeds 10MB limit')
+      setError('File size exceeds 10GB limit')
       return
     }
 
@@ -155,7 +155,7 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
           ) : (
             <div>
               <p className="text-slate-200 font-semibold">Drag documents here or click to select</p>
-              <p className="text-slate-400 text-sm mt-1">Supported: PDF, TXT, DOC, DOCX (Max 10MB)</p>
+              <p className="text-slate-400 text-sm mt-1">Supported: PDF, TXT, DOC, DOCX (Max 10GB)</p>
             </div>
           )}
         </div>
