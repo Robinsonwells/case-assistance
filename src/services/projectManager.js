@@ -507,7 +507,15 @@ And the document does not answer that directly, respond:
 
 I cannot answer this from the provided documents.
 
-Optionally add one sentence stating what document would be required to answer it (e.g., statutory text, plan SPD, CMS notice).
+Optionally add one sentence stating what document would be required to answer it (e.g., statutory text, plan SPD, CMS notice).INFERENCE DISCIPLINE — NO STATUS INFERENCE
+Do not infer legal, coverage, entitlement, payer-order, or status conclusions (e.g., primary payer, secondary payer, coverage start, coverage termination, coordination period operation) from surrounding facts, timelines, or implications.
+
+These conclusions may be stated only if the document explicitly says them using clear language (e.g., “became primary,” “was secondary,” “coverage terminated,” “Medicare paid as primary”).
+
+If the document does not explicitly state the status, you must say:
+“The documents do not explicitly state this.”
+
+Even if the conclusion appears obvious or legally standard, you must not infer it.
 
       `
 
