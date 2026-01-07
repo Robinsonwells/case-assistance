@@ -3,6 +3,8 @@ import React, { useState, useRef } from 'react'
 export default function DocumentUpload({ projectManager, onUploadComplete }) {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [stage, setStage] = useState('')
+  const [stageLabel, setStageLabel] = useState('')
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [error, setError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
@@ -32,15 +34,22 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       setError('')
       setUploading(true)
       setProgress(0)
+      setStage('')
+      setStageLabel('')
 
-      // Upload document with progress tracking
+      // Upload document with detailed progress tracking
       const result = await projectManager.uploadDocumentToProject(file, {
-        onProgress: (current, total, percentage) => {
+        onProgress: (percentage, total) => {
           setProgress(percentage)
+        },
+        onStageProgress: (stageName, label) => {
+          setStage(stageName)
+          setStageLabel(label)
         }
       })
 
       setProgress(100)
+      setStageLabel('Complete!')
 
       // Add to uploaded files list
       setUploadedFiles(prev => [
@@ -55,6 +64,8 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       // Reset after a short delay
       setTimeout(() => {
         setProgress(0)
+        setStage('')
+        setStageLabel('')
         setUploading(false)
         if (onUploadComplete) {
           onUploadComplete()
@@ -65,6 +76,19 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       setError(err.message || 'Failed to upload document. Please try again.')
       setUploading(false)
       setProgress(0)
+      setStage('')
+      setStageLabel('')
+    }
+  }
+
+  const handleCancelUpload = () => {
+    if (uploading && projectManager) {
+      projectManager.cancelUpload()
+      setError('Upload cancelled by user')
+      setUploading(false)
+      setProgress(0)
+      setStage('')
+      setStageLabel('')
     }
   }
 
@@ -162,23 +186,41 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
       </div>
 
       {/* Progress bar */}
-      {uploading && progress > 0 && (
-        <div className="space-y-2">
+      {uploading && (
+        <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <p className="text-sm text-slate-400">
-              {progress < 100 ? 'Generating embeddings...' : 'Complete!'}
-            </p>
-            <p className="text-sm font-semibold text-blue-400">{Math.round(progress)}%</p>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-300">
+                {stageLabel || 'Processing...'}
+              </p>
+              {stage && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {stage === 'extracting' && 'Reading PDF pages...'}
+                  {stage === 'chunking' && 'Splitting into searchable chunks...'}
+                  {stage === 'embedding' && 'Creating vector embeddings...'}
+                  {stage === 'saving' && 'Writing to disk...'}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <p className="text-sm font-semibold text-blue-400">{Math.round(progress)}%</p>
+              <button
+                onClick={handleCancelUpload}
+                className="px-3 py-1 text-xs font-medium text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-700/50 rounded transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-          <div className="w-full bg-slate-600 rounded-full h-2 overflow-hidden">
+          <div className="w-full bg-slate-600 rounded-full h-2.5 overflow-hidden">
             <div
-              className="bg-blue-500 h-full transition-all duration-300"
+              className="bg-gradient-to-r from-blue-500 to-blue-400 h-full transition-all duration-300 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
           {progress > 0 && progress < 100 && (
             <p className="text-xs text-slate-500">
-              Processing in memory-efficient batches (50 chunks at a time)
+              Processing with async breaks to keep UI responsive
             </p>
           )}
         </div>

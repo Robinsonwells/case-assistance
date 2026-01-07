@@ -129,8 +129,10 @@ export default class EmbeddingGenerator {
       }
 
       // Extract options with defaults
-      const batchSize = options.batchSize || 50
+      // Use smaller batch size for better UI responsiveness
+      const batchSize = options.batchSize || 25
       const onProgress = options.onProgress || (() => {})
+      const cancelled = options.cancelled || { value: false }
 
       console.log(`Generating ${textArray.length} embeddings in batches of ${batchSize}...`)
 
@@ -141,15 +143,28 @@ export default class EmbeddingGenerator {
       const totalBatches = Math.ceil(textArray.length / batchSize)
 
       for (let i = 0; i < textArray.length; i += batchSize) {
+        // Check for cancellation
+        if (cancelled.value) {
+          throw new Error('Embedding generation cancelled')
+        }
+
         const batch = textArray.slice(i, i + batchSize)
         const currentBatch = Math.floor(i / batchSize) + 1
 
-        // Process batch in parallel
-        const batchResults = await Promise.all(
-          batch.map(text => this._generateEmbeddingWithRetry(text))
-        )
+        // Process batch items one at a time with yield points for better responsiveness
+        for (let j = 0; j < batch.length; j++) {
+          if (cancelled.value) {
+            throw new Error('Embedding generation cancelled')
+          }
 
-        embeddings.push(...batchResults)
+          const embedding = await this._generateEmbeddingWithRetry(batch[j])
+          embeddings.push(embedding)
+
+          // Yield to main thread every 5 embeddings
+          if ((embeddings.length % 5) === 0) {
+            await this._yieldToMainThread()
+          }
+        }
 
         // Calculate progress
         const processed = Math.min(i + batchSize, textArray.length)
@@ -161,10 +176,9 @@ export default class EmbeddingGenerator {
         // Call progress callback
         onProgress(processed, textArray.length, percentage)
 
-        // Add small delay between batches to allow garbage collection
-        // This prevents memory buildup on large documents
+        // Longer delay between batches to allow UI updates and garbage collection
         if (i + batchSize < textArray.length) {
-          await new Promise(resolve => setTimeout(resolve, 100))
+          await this._yieldToMainThread(200)
         }
       }
 
@@ -205,9 +219,17 @@ export default class EmbeddingGenerator {
   }
 
   /**
+   * Yield control to the main thread to allow UI updates
+   * @private
+   */
+  async _yieldToMainThread(delay = 0) {
+    return new Promise(resolve => setTimeout(resolve, delay))
+  }
+
+  /**
    * Check if model is initialized and ready
    * Useful for UI feedback
-   * 
+   *
    * @returns {boolean} - True if model is loaded and ready
    */
   isInitialized() {

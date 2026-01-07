@@ -6,6 +6,7 @@ import PerplexityAPI from './perplexityAPI'
 import PDFExtractor from './pdfExtractor'
 import KeywordExtractor from './keywordExtractor'
 import KeywordSearcher from './keywordSearcher'
+import WorkerManager from './workerManager'
 
 /**
  * ProjectManager - Core orchestrator for all project operations
@@ -34,6 +35,10 @@ export default class ProjectManager {
     this.pdfExtractor = new PDFExtractor()
     this.keywordExtractor = new KeywordExtractor()
     this.keywordSearcher = new KeywordSearcher()
+    this.workerManager = new WorkerManager()
+
+    // Cancellation tracking
+    this.currentUploadCancelled = { value: false }
   }
 
   /**
@@ -175,36 +180,80 @@ export default class ProjectManager {
         throw new Error('No file provided')
       }
 
+      // Reset cancellation flag
+      this.currentUploadCancelled.value = false
+
+      const onStageProgress = options.onStageProgress || (() => {})
+      const onProgress = options.onProgress || (() => {})
+
       const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
       let chunks
 
       if (isPDF) {
-        // PDF: Use token-based chunking
-        console.log('📄 Processing PDF with token-based chunking...')
+        // PDF: Use Web Worker for extraction and token-based chunking
+        console.log('📄 Processing PDF with Web Worker...')
+        onStageProgress('extracting', 'Extracting text from PDF...')
 
-        // Extract raw text from PDF
-        const extractionResult = await this.pdfExtractor.extractText(file)
+        // Extract raw text from PDF using Web Worker
+        const arrayBuffer = await file.arrayBuffer()
+        const extractionResult = await this.workerManager.extractPDFText(
+          arrayBuffer,
+          (progressData) => {
+            if (progressData.type === 'pdf_extraction_progress') {
+              onProgress(progressData.percentage * 0.2, 100)
+            }
+          }
+        )
+
+        if (this.currentUploadCancelled.value) {
+          throw new Error('Upload cancelled')
+        }
+
         const { text, pageCount, pageRanges } = extractionResult
-
         console.log(`✓ Extracted ${text.length} characters from ${pageCount} pages`)
 
-        // Chunk by tokens with overlap
-        chunks = this.tokenChunker.chunkByTokens(text, {
-          sourceFile: file.name,
-          pageCount,
-          documentType: 'pdf'
-        })
+        // Chunk by tokens with overlap using Web Worker
+        onStageProgress('chunking', 'Creating text chunks...')
+        chunks = await this.workerManager.chunkByTokens(
+          text,
+          {
+            sourceFile: file.name,
+            pageCount,
+            documentType: 'pdf'
+          },
+          (progressData) => {
+            if (progressData.type === 'chunking_progress') {
+              onProgress(20 + (progressData.percentage * 0.1), 100)
+            }
+          }
+        )
+
+        if (this.currentUploadCancelled.value) {
+          throw new Error('Upload cancelled')
+        }
 
         // Enrich chunks with page information
         chunks = this._enrichChunksWithPageInfo(chunks, pageRanges)
 
         console.log(`✓ Created ${chunks.length} token-based chunks with 300-token overlap`)
       } else {
-        // Structured documents: Use paragraph-based chunking
-        console.log('📝 Processing structured document with paragraph-based chunking...')
+        // Structured documents: Use Web Worker for paragraph-based chunking
+        console.log('📝 Processing structured document with Web Worker...')
+        onStageProgress('chunking', 'Creating text chunks...')
 
         const fileText = await file.text()
-        chunks = this.paragraphChunker.chunkByParagraph(fileText)
+        chunks = await this.workerManager.chunkByParagraphs(
+          fileText,
+          (progressData) => {
+            if (progressData.type === 'chunking_progress') {
+              onProgress(20 + (progressData.percentage * 0.1), 100)
+            }
+          }
+        )
+
+        if (this.currentUploadCancelled.value) {
+          throw new Error('Upload cancelled')
+        }
 
         console.log(`✓ Created ${chunks.length} paragraph-based chunks`)
       }
@@ -216,18 +265,31 @@ export default class ProjectManager {
       // Extract text from chunks for batch embedding
       const chunkTexts = chunks.map(chunk => chunk.text)
 
-      // Generate embeddings using memory-efficient batch processing
+      // Generate embeddings with async breaks for UI responsiveness
       console.log(`Generating embeddings for ${chunks.length} chunks...`)
+      onStageProgress('embedding', 'Generating embeddings...')
+
       const embeddings = await this.embeddingGenerator.generateEmbeddings(chunkTexts, {
-        batchSize: 50,
-        onProgress: options.onProgress
+        batchSize: 25,
+        cancelled: this.currentUploadCancelled,
+        onProgress: (current, total, percentage) => {
+          onProgress(30 + (percentage * 0.6), 100)
+        }
       })
+
+      if (this.currentUploadCancelled.value) {
+        throw new Error('Upload cancelled')
+      }
 
       // Combine chunks with their embeddings
       const chunksWithEmbeddings = chunks.map((chunk, index) => ({
         ...chunk,
         embedding: embeddings[index]
       }))
+
+      // Write to file system
+      onStageProgress('saving', 'Saving to project...')
+      onProgress(95, 100)
 
       // Create filename with timestamp
       const timestamp = Date.now()
@@ -252,7 +314,9 @@ export default class ProjectManager {
       // Update project metadata
       await this._updateProjectMetadata(jsonFilename, file.name)
 
+      onProgress(100, 100)
       console.log(`✅ Document "${file.name}" uploaded and processed successfully`)
+
       return {
         fileName: jsonFilename,
         chunkCount: chunksWithEmbeddings.length
@@ -261,6 +325,14 @@ export default class ProjectManager {
       console.error('Error uploading document:', err)
       throw new Error(`Failed to upload document: ${err.message}`)
     }
+  }
+
+  /**
+   * Cancel the current upload operation
+   */
+  cancelUpload() {
+    this.currentUploadCancelled.value = true
+    this.workerManager.cancel()
   }
 
   /**
