@@ -6,6 +6,7 @@ export default function QueryInterface({ projectManager, projectName }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [queriesHistory, setQueriesHistory] = useState([])
+  const [showKeywordDetails, setShowKeywordDetails] = useState(false)
 
   const handleQuery = async () => {
     if (!question.trim()) {
@@ -25,7 +26,9 @@ export default function QueryInterface({ projectManager, projectName }) {
       setAnswer({
         text: result.answer,
         sourcesCount: result.relevantChunks?.length || 0,
-        timestamp: new Date().toLocaleTimeString()
+        timestamp: new Date().toLocaleTimeString(),
+        keywordData: result.keywordData || null,
+        retrievalStats: result.retrievalStats || null
       })
 
       // Add to history
@@ -142,6 +145,90 @@ export default function QueryInterface({ projectManager, projectName }) {
       {/* Answer section */}
       {answer && (
         <div className="space-y-3 flex-1 overflow-y-auto">
+          {/* Retrieval Statistics */}
+          {answer.retrievalStats && (
+            <div className="grid grid-cols-3 gap-3">
+              <div className="p-3 bg-blue-900/30 border border-blue-700/50 rounded-lg">
+                <div className="text-xs text-blue-300 mb-1">Semantic</div>
+                <div className="text-lg font-semibold text-blue-100">
+                  {answer.retrievalStats.semanticCount}
+                </div>
+              </div>
+              <div className="p-3 bg-green-900/30 border border-green-700/50 rounded-lg">
+                <div className="text-xs text-green-300 mb-1">Keyword</div>
+                <div className="text-lg font-semibold text-green-100">
+                  {answer.retrievalStats.keywordCount}
+                </div>
+              </div>
+              <div className="p-3 bg-purple-900/30 border border-purple-700/50 rounded-lg">
+                <div className="text-xs text-purple-300 mb-1">Total</div>
+                <div className="text-lg font-semibold text-purple-100">
+                  {answer.retrievalStats.totalCount}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Keyword Information */}
+          {answer.keywordData && answer.keywordData.extracted && answer.keywordData.extracted.length > 0 && (
+            <div className="p-4 bg-slate-700/50 border border-slate-600 rounded-lg">
+              <button
+                onClick={() => setShowKeywordDetails(!showKeywordDetails)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                  </svg>
+                  <span className="text-sm font-medium text-slate-200">
+                    Keywords Extracted ({answer.keywordData.extracted.length})
+                  </span>
+                </div>
+                <svg
+                  className={`w-4 h-4 text-slate-400 transition-transform ${showKeywordDetails ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {showKeywordDetails && (
+                <div className="mt-3 space-y-2">
+                  {answer.keywordData.extracted.map((keyword, idx) => (
+                    <div key={idx} className="p-2 bg-slate-800/50 rounded border border-slate-600/50">
+                      <div className="text-sm font-medium text-slate-200 mb-1">
+                        {keyword.term}
+                      </div>
+                      {keyword.variations && keyword.variations.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {keyword.variations.map((variation, vIdx) => (
+                            <span
+                              key={vIdx}
+                              className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded"
+                            >
+                              {variation}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {answer.keywordData.searchStats && (
+                    <div className="mt-2 pt-2 border-t border-slate-600 text-xs text-slate-400">
+                      <div className="flex items-center justify-between">
+                        <span>Unique keywords matched:</span>
+                        <span className="font-medium">{answer.keywordData.searchStats.uniqueKeywords}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Answer */}
           <div className="p-6 bg-slate-700 rounded-lg border border-slate-600 space-y-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1">

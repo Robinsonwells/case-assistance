@@ -4,6 +4,8 @@ import EmbeddingGenerator from './embeddingGenerator'
 import RAGRetriever from './ragRetriever'
 import PerplexityAPI from './perplexityAPI'
 import PDFExtractor from './pdfExtractor'
+import KeywordExtractor from './keywordExtractor'
+import KeywordSearcher from './keywordSearcher'
 
 /**
  * ProjectManager - Core orchestrator for all project operations
@@ -30,6 +32,8 @@ export default class ProjectManager {
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
     this.pdfExtractor = new PDFExtractor()
+    this.keywordExtractor = new KeywordExtractor()
+    this.keywordSearcher = new KeywordSearcher()
   }
 
   /**
@@ -348,9 +352,9 @@ export default class ProjectManager {
   }
 
   /**
-   * Query the project with a question
+   * Query the project with a question using hybrid retrieval (semantic + keyword)
    * @param {string} question - User's question
-   * @returns {Promise<object>} - {question, answer, sourcesUsed, relevantChunks}
+   * @returns {Promise<object>} - {question, answer, sourcesUsed, relevantChunks, keywordData}
    */
   async queryProject(question) {
     try {
@@ -362,6 +366,9 @@ export default class ProjectManager {
         throw new Error('Question cannot be empty')
       }
 
+      console.log('=== HYBRID RETRIEVAL QUERY ===')
+      console.log('Question:', question)
+
       // Get all chunks from project
       const chunks = await this.getProjectChunks()
 
@@ -369,27 +376,91 @@ export default class ProjectManager {
         throw new Error('No documents found in project. Please upload some documents first.')
       }
 
+      console.log(`Total chunks available: ${chunks.length}`)
+
       // Initialize embedding generator if not already initialized
       if (!this.embeddingGenerator.isInitialized()) {
         console.log('Initializing embedding generator for first query...')
         await this.embeddingGenerator.initialize()
       }
 
-      // Retrieve relevant chunks using RAG (semantic search)
-      // Pass embeddingGenerator for semantic similarity
-      const relevantChunks = await this.ragRetriever.findRelevantChunks(
+      // STEP 1: Extract keywords using LLM (mandatory for every query)
+      console.log('\n--- STEP 1: Keyword Extraction ---')
+      const keywordResult = await this.keywordExtractor.extractKeywords(question)
+
+      let keywordData = {
+        extracted: [],
+        allTerms: [],
+        error: keywordResult.error
+      }
+
+      if (keywordResult.keywords && keywordResult.keywords.length > 0) {
+        keywordData.extracted = keywordResult.keywords
+        keywordData.allTerms = this.keywordExtractor.getAllTerms(keywordResult)
+        console.log(`Extracted ${keywordResult.keywords.length} keywords with ${keywordData.allTerms.length} total terms`)
+      } else {
+        console.log('No keywords extracted, will use semantic-only search')
+      }
+
+      // STEP 2: Semantic search - get top 100 chunks
+      console.log('\n--- STEP 2: Semantic Search (Top 100) ---')
+      const semanticChunks = await this.ragRetriever.findRelevantChunks(
         question,
         chunks,
-        15, // top K
-        this.embeddingGenerator // Enable semantic search
+        100, // Get top 100 semantic chunks
+        this.embeddingGenerator
       )
+      console.log(`Retrieved ${semanticChunks.length} semantic chunks`)
 
-      // Build context from relevant chunks
-      const context = relevantChunks
+      // STEP 3: Keyword search across all chunks
+      console.log('\n--- STEP 3: Keyword Search ---')
+      let keywordChunks = []
+
+      if (keywordData.allTerms.length > 0) {
+        const allKeywordMatches = this.keywordSearcher.searchChunks(
+          keywordData.allTerms,
+          chunks
+        )
+        console.log(`Found ${allKeywordMatches.length} chunks with keyword matches`)
+
+        // STEP 4: Filter out chunks already in semantic results
+        console.log('\n--- STEP 4: Filtering Duplicates ---')
+        keywordChunks = this.keywordSearcher.filterDuplicates(
+          allKeywordMatches,
+          semanticChunks
+        )
+        console.log(`After deduplication: ${keywordChunks.length} additional keyword chunks`)
+      } else {
+        console.log('Skipping keyword search (no keywords extracted)')
+      }
+
+      // STEP 5: Combine results (semantic + additional keyword chunks)
+      console.log('\n--- STEP 5: Combining Results ---')
+      const combinedChunks = [
+        ...semanticChunks.map(c => ({ ...c, matchType: 'semantic' })),
+        ...keywordChunks
+      ]
+
+      console.log(`Total chunks for context: ${combinedChunks.length}`)
+      console.log(`  - Semantic: ${semanticChunks.length}`)
+      console.log(`  - Additional keyword: ${keywordChunks.length}`)
+
+      // Update keyword data with search stats
+      if (keywordChunks.length > 0) {
+        const searchStats = this.keywordSearcher.getSearchStats(keywordChunks)
+        keywordData.searchStats = searchStats
+      }
+
+      // STEP 6: Build context from combined chunks
+      console.log('\n--- STEP 6: Building Context ---')
+      const context = combinedChunks
         .map((chunk, idx) => `[${idx + 1}] ${chunk.text}`)
         .join('\n\n')
 
-      // Query Perplexity with context
+      console.log(`Context length: ${context.length} characters`)
+
+      // STEP 7: Query Perplexity with combined context
+      console.log('\n--- STEP 7: Querying LLM ---')
       const systemPrompt = `SYSTEM ROLE
 
 You are an expert document-grounded question-answering assistant.
@@ -463,13 +534,13 @@ INFERENCE SAFETY RULE (HARD CONSTRAINT)
 
 You may NOT:
 
-convert “eligibility” → “payment obligation”
+convert "eligibility" → "payment obligation"
 
-convert “coverage start” → “primary payer”
+convert "coverage start" → "primary payer"
 
-convert “plan termination” → “coordination period end”
+convert "plan termination" → "coordination period end"
 
-convert “purpose” → “need” or vice versa
+convert "purpose" → "need" or vice versa
 
 fill statutory or procedural gaps with assumptions
 
@@ -477,14 +548,14 @@ Unless the document explicitly states that connection.
 
 If the document states:
 
-“Medicare became Patient A’s primary insurance on August 31, 2018”
+"Medicare became Patient A's primary insurance on August 31, 2018"
 
 You may repeat that fact.
 You may not explain why unless the document explains why.
 
 If the document does not explicitly state a status, you must say:
 
-“The documents do not explicitly state this.”
+"The documents do not explicitly state this."
 
 Even if the conclusion seems legally obvious.
 
@@ -493,7 +564,7 @@ REQUIRED INTERNAL REASONING STEPS (SILENT, BUT MANDATORY)
 Before answering, you must internally do the following:
 
 Identify the section(s) of the document the question targets
-(e.g., “Purpose and Need,” “Background,” “Plan Provisions”).
+(e.g., "Purpose and Need," "Background," "Plan Provisions").
 
 Extract all explicit statements responsive to the question.
 
@@ -520,13 +591,13 @@ Start with a concise statement answering only what the documents support.
 
 Use document-mirroring language:
 
-“became entitled”
+"became entitled"
 
-“remained a member”
+"remained a member"
 
-“became primary insurance”
+"became primary insurance"
 
-“states the purpose is…”
+"states the purpose is…"
 
 EVIDENCE
 
@@ -568,7 +639,7 @@ and the document does not directly answer that:
 
 Respond exactly:
 
-“I cannot answer this from the provided documents.”
+"I cannot answer this from the provided documents."
 
 Optionally add one sentence only stating what document would be required
 (e.g., statutory text, plan SPD, CMS notice).
@@ -595,7 +666,7 @@ No purpose/need conflation occurred.
 
 Every statement is traceable to document text.
 
-Any unexplained gap is explicitly acknowledged.“When the user asks for ‘preparation’ vs ‘publication,’ do not substitute NOA/publication dates unless the document explicitly equates them. If only NOA/publication is provided, answer with that and explicitly state that ‘preparation date is not stated.’”
+Any unexplained gap is explicitly acknowledged."When the user asks for 'preparation' vs 'publication,' do not substitute NOA/publication dates unless the document explicitly equates them. If only NOA/publication is provided, answer with that and explicitly state that 'preparation date is not stated.'"
 
       `
 
@@ -605,23 +676,35 @@ Any unexplained gap is explicitly acknowledged.“When the user asks for ‘prep
         question
       })
 
+      console.log('LLM response received')
+
       // Update metadata with last query time
       await this._updateLastQueriedTime()
 
       // Format chunks for UI display
-      const formattedChunks = relevantChunks.map(chunk => ({
+      const formattedChunks = combinedChunks.map(chunk => ({
         content: chunk.text,
         fileName: chunk.metadata?.sourceFile || 'Unknown file',
-        similarity: chunk.score, // Score is cosine similarity (0-1)
-        semanticScore: chunk.semanticScore, // Semantic similarity score
-        metadata: chunk.metadata // Include all metadata (page info, etc.)
+        similarity: chunk.score || null,
+        semanticScore: chunk.semanticScore || null,
+        matchType: chunk.matchType || 'semantic',
+        keywordMatches: chunk.keywordMatches || null,
+        metadata: chunk.metadata
       }))
+
+      console.log('=== QUERY COMPLETE ===\n')
 
       return {
         question: question.trim(),
         answer,
         sourcesUsed: formattedChunks.length,
-        relevantChunks: formattedChunks
+        relevantChunks: formattedChunks,
+        keywordData,
+        retrievalStats: {
+          semanticCount: semanticChunks.length,
+          keywordCount: keywordChunks.length,
+          totalCount: combinedChunks.length
+        }
       }
     } catch (err) {
       console.error('Error querying project:', err)

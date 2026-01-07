@@ -64,8 +64,8 @@ export default class RAGRetriever {
       }
 
       // Validate topK
-      if (typeof topK !== 'number' || topK < 1 || topK > 50) {
-        console.warn('topK should be between 1 and 50, defaulting to 15')
+      if (typeof topK !== 'number' || topK < 1 || topK > 200) {
+        console.warn('topK should be between 1 and 200, defaulting to 15')
         topK = 15
       }
 
