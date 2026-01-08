@@ -9,7 +9,20 @@ interface QueryRequest {
   temperature?: number;
 }
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
+};
+
 Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 200,
+      headers: corsHeaders,
+    });
+  }
+
   try {
     const apiKey = Deno.env.get("PERPLEXITY_API_KEY");
 
@@ -22,6 +35,7 @@ Deno.serve(async (req: Request) => {
         {
           status: 500,
           headers: {
+            ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
@@ -60,6 +74,7 @@ Deno.serve(async (req: Request) => {
         {
           status: 400,
           headers: {
+            ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
@@ -103,6 +118,7 @@ Deno.serve(async (req: Request) => {
         {
           status: response.status,
           headers: {
+            ...corsHeaders,
             "Content-Type": "application/json",
           },
         }
@@ -113,6 +129,7 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify(data), {
       headers: {
+        ...corsHeaders,
         "Content-Type": "application/json",
       },
     });
@@ -122,6 +139,7 @@ Deno.serve(async (req: Request) => {
       {
         status: 500,
         headers: {
+          ...corsHeaders,
           "Content-Type": "application/json",
         },
       }

@@ -1,5 +1,4 @@
-const BACKEND_URL =
-  import.meta.env.VITE_BACKEND_URL || 'https://tl3ygknv5pvyglpkpmaznrugcu0ojspw.lambda-url.us-east-2.on.aws/'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL
 
 export async function callPerplexity(payload) {
   const response = await fetch(BACKEND_URL, {
