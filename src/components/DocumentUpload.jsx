@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 
 export default function DocumentUpload({ projectManager, onUploadComplete }) {
   const [uploading, setUploading] = useState(false)
@@ -8,7 +8,23 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [error, setError] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [deviceInfo, setDeviceInfo] = useState(null)
   const fileInputRef = useRef(null)
+
+  useEffect(() => {
+    // Get device info from the embedding generator
+    const checkDevice = async () => {
+      try {
+        if (projectManager?.embeddingGenerator) {
+          const info = projectManager.embeddingGenerator.getModelInfo()
+          setDeviceInfo(info)
+        }
+      } catch (err) {
+        console.error('Failed to get device info:', err)
+      }
+    }
+    checkDevice()
+  }, [projectManager])
 
   const handleFileSelect = async (file) => {
     if (!file) return
@@ -60,6 +76,12 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
           uploadedAt: new Date().toLocaleString()
         }
       ])
+
+      // Update device info after successful upload (model is now initialized)
+      if (projectManager?.embeddingGenerator) {
+        const info = projectManager.embeddingGenerator.getModelInfo()
+        setDeviceInfo(info)
+      }
 
       // Reset after a short delay
       setTimeout(() => {
@@ -129,8 +151,35 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-xl font-semibold text-white mb-4">Upload Documents</h3>
-        <p className="text-slate-400 text-sm">Add legal documents to your project for analysis and search</p>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-xl font-semibold text-white mb-2">Upload Documents</h3>
+            <p className="text-slate-400 text-sm">Add legal documents to your project for analysis and search</p>
+          </div>
+          {deviceInfo && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-medium ${
+              deviceInfo.gpuAccelerated
+                ? 'bg-green-900/30 border-green-700/50 text-green-300'
+                : 'bg-slate-700/50 border-slate-600 text-slate-300'
+            }`}>
+              {deviceInfo.gpuAccelerated ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  <span>GPU Accelerated</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                  <span>CPU Mode</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Drag and drop zone */}
