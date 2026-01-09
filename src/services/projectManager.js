@@ -265,7 +265,7 @@ export default class ProjectManager {
         throw new Error('No chunks were created from the document. The file may be empty or invalid.')
       }
 
-      // Extract text from chunks for batch embedding
+      // Extract text from chunks for embedding
       const chunkTexts = chunks.map(chunk => chunk.text)
 
       // Generate embeddings with async breaks for UI responsiveness
@@ -273,7 +273,6 @@ export default class ProjectManager {
       onStageProgress('embedding', 'Generating embeddings...')
 
       const embeddings = await this.embeddingGenerator.generateEmbeddings(chunkTexts, {
-        batchSize: 25,
         cancelled: this.currentUploadCancelled,
         onProgress: (current, total, percentage) => {
           onProgress(30 + (percentage * 0.6), 100)

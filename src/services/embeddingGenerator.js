@@ -158,12 +158,11 @@ export default class EmbeddingGenerator {
   }
 
   /**
-   * Generate embeddings for multiple texts with batch processing
-   * Processes 12 texts at a time for optimal performance
+   * Generate embeddings for multiple texts one at a time
+   * Processes each text individually for consistency
    *
    * @param {array} textArray - Array of text strings to embed
    * @param {object} options - Configuration options
-   * @param {number} options.batchSize - Chunks to process per batch (default: 12)
    * @param {function} options.onProgress - Progress callback function(current, total, percentage)
    * @returns {Promise<array>} - Array of embedding vectors
    */
@@ -185,51 +184,46 @@ export default class EmbeddingGenerator {
       }
 
       // Extract options with defaults
-      const batchSize = options.batchSize || 12
       const onProgress = options.onProgress || (() => {})
       const cancelled = options.cancelled || { value: false }
 
-      console.log(`Generating ${textArray.length} embeddings in batches of ${batchSize}...`)
+      console.log(`Generating ${textArray.length} embeddings one at a time...`)
 
       // Initialize model once for all embeddings
       await this.initialize()
 
       const embeddings = []
-      const totalBatches = Math.ceil(textArray.length / batchSize)
 
-      for (let i = 0; i < textArray.length; i += batchSize) {
+      for (let i = 0; i < textArray.length; i++) {
         // Check for cancellation
         if (cancelled.value) {
           throw new Error('Embedding generation cancelled')
         }
 
-        const batch = textArray.slice(i, i + batchSize)
-        const currentBatch = Math.floor(i / batchSize) + 1
-
-        // Process entire batch at once using the model's batch processing
-        const batchEmbeddings = await this._generateBatchEmbeddingsWithRetry(batch)
-        embeddings.push(...batchEmbeddings)
+        // Process one chunk at a time
+        const embedding = await this._generateEmbeddingWithRetry(textArray[i])
+        embeddings.push(embedding)
 
         // Calculate progress
-        const processed = Math.min(i + batchSize, textArray.length)
+        const processed = i + 1
         const percentage = Math.round((processed / textArray.length) * 100)
 
         // Log progress
-        console.log(`Batch ${currentBatch}/${totalBatches}: ${processed}/${textArray.length} embeddings (${percentage}%)`)
+        console.log(`Chunk ${processed}/${textArray.length} embeddings (${percentage}%)`)
 
         // Call progress callback
         onProgress(processed, textArray.length, percentage)
 
-        // Yield to main thread between batches for UI updates
-        if (i + batchSize < textArray.length) {
-          await this._yieldToMainThread(100)
+        // Yield to main thread after each chunk for UI updates
+        if (i < textArray.length - 1) {
+          await this._yieldToMainThread(10)
         }
       }
 
       console.log(`Successfully generated ${embeddings.length} embeddings`)
       return embeddings
     } catch (err) {
-      console.error('Error generating embeddings batch:', err)
+      console.error('Error generating embeddings:', err)
       throw new Error(`Failed to generate embeddings: ${err.message}`)
     }
   }
@@ -263,55 +257,6 @@ export default class EmbeddingGenerator {
   }
 
   /**
-   * Generate embeddings for a batch of texts with retry logic
-   * Processes multiple texts at once for better performance
-   *
-   * @private
-   * @param {array} textBatch - Array of texts to embed
-   * @returns {Promise<array>} - Array of embedding vectors
-   */
-  async _generateBatchEmbeddingsWithRetry(textBatch, retryCount = 0) {
-    try {
-      // Ensure model is initialized
-      await this.initialize()
-
-      // Process batch through the model
-      const result = await this.extractor(textBatch, {
-        pooling: 'mean',
-        normalize: true
-      })
-
-      // Extract embeddings from result
-      // For batch processing, result.data contains all embeddings concatenated
-      const embeddings = []
-      const embeddingDim = 384
-
-      for (let i = 0; i < textBatch.length; i++) {
-        const start = i * embeddingDim
-        const end = start + embeddingDim
-        const embedding = Array.from(result.data.slice(start, end))
-        embeddings.push(embedding)
-      }
-
-      return embeddings
-    } catch (err) {
-      if (retryCount < this.maxRetries) {
-        console.warn(
-          `Retry ${retryCount + 1}/${this.maxRetries} for batch embedding generation:`,
-          err.message
-        )
-
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, this.retryDelay))
-
-        return this._generateBatchEmbeddingsWithRetry(textBatch, retryCount + 1)
-      } else {
-        throw new Error(`Failed to generate batch embeddings after ${this.maxRetries} retries: ${err.message}`)
-      }
-    }
-  }
-
-  /**
    * Yield control to the main thread to allow UI updates
    * @private
    */
@@ -340,7 +285,6 @@ export default class EmbeddingGenerator {
       model: 'Xenova/all-MiniLM-L6-v2',
       modelSize: '23MB',
       embeddingDimension: 384,
-      batchSize: 12,
       pooling: 'mean',
       normalized: true,
       device: this.device || 'not detected',
