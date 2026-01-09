@@ -62,26 +62,45 @@ For structured documents (TXT, DOCX, MD), we use **paragraph chunking** because:
 **Configuration:**
 ```javascript
 {
-  targetTokens: 1000,      // Target chunk size
-  maxTokens: 1200,         // Maximum chunk size
-  minTokens: 600,          // Minimum chunk size (enforced)
-  overlapTokens: 300       // Overlap between chunks
+  targetTokens: 350,       // Target chunk size (optimized for legal precision)
+  maxTokens: 500,          // Maximum chunk size
+  minTokens: 200,          // Minimum chunk size (enforced)
+  overlapTokens: 50        // Overlap between chunks (~14% of target)
 }
 ```
 
-**Why 300 Token Overlap?**
+**Why Smaller Chunks for Legal Documents?**
 
-The overlap ensures that:
+Research and best practices show that **300-500 tokens** is optimal for:
+- High-precision legal/compliance queries
+- Preserving statutory context without diluting relevance
+- Reducing semantic drift when retrieving many chunks
+- Improving cosine similarity precision
+- Maintaining citation fidelity
+
+**Why 50 Token Overlap?**
+
+The 10-15% overlap ensures that:
 - Concepts split across chunk boundaries remain retrievable
 - Legal citations aren't partially lost
 - Context is preserved for semantic search
-- RAG retrieval has better recall
+- Minimal redundancy when retrieving large volumes (100+ chunks)
+- Prevents retrieval inflation while maintaining boundary protection
 
 **Safety Guarantees:**
 
-1. **Minimum token enforcement**: Final chunks smaller than `minTokens` are merged with the previous chunk to prevent tiny tail chunks
-2. **Progress guarantee**: Always advances at least 25% of target size to prevent infinite loops
+1. **Minimum token enforcement**: Final chunks smaller than `minTokens` (200) are merged with the previous chunk to prevent tiny tail chunks
+2. **Progress guarantee**: Always advances at least 25% of target size (~88 chars) to prevent infinite loops
 3. **No text loss**: 100% coverage of original document guaranteed
+
+**Optimized for Legal Document Retrieval:**
+
+When retrieving large volumes (100+ chunks per query), smaller chunks:
+- Reduce semantic drift (one legal concept per chunk)
+- Improve cosine similarity precision
+- Minimize hallucination risk during synthesis
+- Preserve citation accuracy
+- Enable pinpoint statutory references
 
 **Metadata Tracked:**
 - `chunkIndex`: Chunk position in document
@@ -97,8 +116,8 @@ The overlap ensures that:
 **Configuration:**
 ```javascript
 {
-  maxParagraphTokens: 1200,  // Maximum paragraph size in tokens
-  overlapTokens: 200,        // Overlap when splitting oversized paragraphs
+  maxParagraphTokens: 500,   // Maximum paragraph size in tokens (aligned with PDF chunks)
+  overlapTokens: 50,         // Overlap when splitting oversized paragraphs (~10%)
   charsPerToken: 4           // Approximate characters per token
 }
 ```
@@ -106,7 +125,7 @@ The overlap ensures that:
 **Process:**
 1. Split on double newlines (`\n\n`)
 2. Each paragraph becomes a chunk
-3. Oversized paragraphs (>1200 tokens) are split with 200-token overlap
+3. Oversized paragraphs (>500 tokens) are split with 50-token overlap
 4. Final sub-chunks smaller than 50% of max are merged with previous chunk
 
 **Why Token-Aware Splitting?**
@@ -155,8 +174,8 @@ Previous versions had "smart" merging heuristics that:
 **Issue:** Final chunk could be very small (e.g., 50 tokens) if document length isn't evenly divisible by target size.
 
 **Solution:**
-- PDFs: Merge final chunk with previous if below `minTokens` (600)
-- Paragraphs: Merge final sub-chunk with previous if below 50% of `maxParagraphTokens`
+- PDFs: Merge final chunk with previous if below `minTokens` (200)
+- Paragraphs: Merge final sub-chunk with previous if below 50% of `maxParagraphTokens` (250 tokens)
 
 ### Problem: Infinite Loops
 
@@ -278,6 +297,25 @@ To verify chunking quality:
 ❌ Don't use capitalization heuristics
 ❌ Don't apply PDF logic to text files
 
+## Chunk Size Rationale
+
+### Why 350-500 Tokens for Legal Documents?
+
+Based on RAG best practices and retrieval research:
+
+| Use Case | Ideal Size | Rationale |
+|----------|------------|-----------|
+| High-precision legal/medical QA | 300-500 tokens | Preserves context without diluting relevance |
+| Multi-chunk synthesis (100+ chunks) | 200-400 tokens | Minimizes noise when many chunks retrieved |
+| Dense statutes/regulations | 300-500 tokens | Aligns with section-level legal meaning |
+
+### Failure Modes We Avoid
+
+❌ **1,000+ token chunks** → Poor recall, mixed concepts, lower cosine precision
+❌ **Sentence-level chunks** → Loss of legal/clinical context
+❌ **Heavy overlap (>20%)** → Retrieval inflation, redundancy
+❌ **Character-only splitting** → Token limit violations, unpredictable sizes
+
 ## Future Considerations
 
 ### Potential Enhancements
@@ -285,12 +323,13 @@ To verify chunking quality:
 2. **Table extraction**: Specialized handling for PDF tables
 3. **Image text**: OCR integration for scanned PDFs
 4. **Multi-column**: Improved column detection for complex layouts
+5. **Section-aware chunking**: Detect legal section headers for natural boundaries
 
 ### Not Recommended
-❌ Replacing token chunking with paragraph inference
-❌ Global auto-merge across document
+❌ Increasing chunk size beyond 600 tokens (reduces precision)
+❌ Replacing token chunking with paragraph inference (causes PDF text loss)
+❌ Global auto-merge across document (unpredictable behavior)
 ❌ Semantic-only chunking (causes information loss)
-❌ Reducing overlap (breaks context preservation)
 
 ## References
 

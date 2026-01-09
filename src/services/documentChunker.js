@@ -12,14 +12,14 @@
 
 export default class DocumentChunker {
   constructor(config = {}) {
-    // Maximum paragraph size before splitting (in tokens)
-    this.maxParagraphTokens = config.maxParagraphTokens || 1200
+    // Maximum paragraph size before splitting (in tokens, optimized for legal precision)
+    this.maxParagraphTokens = config.maxParagraphTokens || 500
 
     // Characters per token (approximate for English)
     this.charsPerToken = config.charsPerToken || 4
 
-    // Overlap when splitting oversized paragraphs (in tokens)
-    this.overlapTokens = config.overlapTokens || 200
+    // Overlap when splitting oversized paragraphs (in tokens, 10% of max)
+    this.overlapTokens = config.overlapTokens || 50
   }
 
   /**

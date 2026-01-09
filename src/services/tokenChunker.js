@@ -13,17 +13,17 @@
 
 export default class TokenChunker {
   constructor(config = {}) {
-    // Target chunk size in tokens (approximate)
-    this.targetTokens = config.targetTokens || 1000
+    // Target chunk size in tokens (optimized for legal document precision)
+    this.targetTokens = config.targetTokens || 350
 
     // Maximum chunk size in tokens
-    this.maxTokens = config.maxTokens || 1200
+    this.maxTokens = config.maxTokens || 500
 
     // Minimum chunk size in tokens
-    this.minTokens = config.minTokens || 600
+    this.minTokens = config.minTokens || 200
 
-    // Overlap between chunks in tokens
-    this.overlapTokens = config.overlapTokens || 300
+    // Overlap between chunks in tokens (10-15% of target)
+    this.overlapTokens = config.overlapTokens || 50
 
     // Characters per token (rough approximation for English)
     this.charsPerToken = config.charsPerToken || 4

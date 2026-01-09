@@ -259,28 +259,45 @@ const chunks = paragraphChunker.chunkByParagraph(paragraph)
 
 ## Configuration Changes
 
-### Before (TokenChunker)
+### TokenChunker Evolution
+
+**Original (Character-based):**
 ```javascript
 {
+  targetTokens: 1000,
   minTokens: 600  // Defined but not enforced
 }
 ```
 
-### After (TokenChunker)
+**After Edge Case Fixes:**
 ```javascript
 {
-  minTokens: 600  // Enforced via merge
+  targetTokens: 1000,
+  minTokens: 600,      // Enforced via merge
+  overlapTokens: 300
 }
 ```
 
-### Before (DocumentChunker)
+**Current (Optimized for Legal Documents):**
+```javascript
+{
+  targetTokens: 350,   // Reduced for precision
+  maxTokens: 500,
+  minTokens: 200,      // Enforced via merge
+  overlapTokens: 50    // 14% overlap, prevents inflation
+}
+```
+
+### DocumentChunker Evolution
+
+**Original (Character-based):**
 ```javascript
 {
   maxParagraphSize: 5000  // Character-based
 }
 ```
 
-### After (DocumentChunker)
+**After Token-Aware Fixes:**
 ```javascript
 {
   maxParagraphTokens: 1200,  // Token-based
@@ -288,6 +305,23 @@ const chunks = paragraphChunker.chunkByParagraph(paragraph)
   charsPerToken: 4           // Explicit ratio
 }
 ```
+
+**Current (Optimized for Legal Documents):**
+```javascript
+{
+  maxParagraphTokens: 500,   // Aligned with PDF target
+  overlapTokens: 50,         // 10% overlap
+  charsPerToken: 4           // Explicit ratio
+}
+```
+
+### Rationale for Current Configuration
+
+Research on legal document retrieval shows:
+- **300-500 tokens**: Optimal for high-precision QA
+- **10-15% overlap**: Prevents boundary loss without inflation
+- **Smaller chunks**: Better for multi-chunk synthesis (100+ chunks)
+- **Reduced drift**: One legal concept per chunk improves accuracy
 
 ---
 
