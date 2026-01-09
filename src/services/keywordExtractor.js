@@ -1,19 +1,93 @@
+import { pipeline } from '@xenova/transformers'
 import PerplexityAPI from './perplexityAPI'
 
 /**
  * KeywordExtractor - Extract keywords and variations from user questions
  *
- * Uses Perplexity API to intelligently identify:
- * - Main concepts and keywords in the user's question
- * - General synonyms and variations for each keyword
- * - Domain-specific terminology when appropriate
+ * Default: Uses local browser-based LLM (Qwen2.5-0.5B-Instruct)
+ * - Fully private, no data leaves browser
+ * - Works offline after initial model download
+ * - Zero API costs
+ * - ~300 MB one-time download, ~600 MB RAM usage
+ *
+ * Fallback: Perplexity API (if local model fails or disabled)
  *
  * This enables robust keyword search that catches chunks semantic search might miss
  */
 export default class KeywordExtractor {
-  constructor() {
+  constructor(options = {}) {
+    this.useLocalModel = options.useLocalModel !== false
+    this.localGenerator = null
+    this.modelLoading = false
+    this.modelLoaded = false
     this.perplexityAPI = new PerplexityAPI()
     this.timeout = 10000
+    this.progressCallback = options.progressCallback || null
+  }
+
+  /**
+   * Initialize the local LLM model
+   * Downloads and caches the model (~300 MB one-time download)
+   */
+  async initialize() {
+    if (this.modelLoaded || this.modelLoading) {
+      return
+    }
+
+    if (!this.useLocalModel) {
+      console.log('Local model disabled, using API fallback')
+      return
+    }
+
+    try {
+      this.modelLoading = true
+      console.log('Loading local keyword extraction model (Qwen2.5-0.5B)...')
+
+      if (this.progressCallback) {
+        this.progressCallback({ status: 'loading', message: 'Initializing model...' })
+      }
+
+      this.localGenerator = await pipeline(
+        'text-generation',
+        'onnx-community/Qwen2.5-0.5B-Instruct',
+        {
+          device: 'webgpu',
+          dtype: 'q4',
+          progress_callback: (progress) => {
+            console.log(`Model loading progress:`, progress)
+            if (this.progressCallback) {
+              this.progressCallback({
+                status: 'downloading',
+                message: `Downloading model... ${progress.status || ''}`,
+                progress: progress
+              })
+            }
+          }
+        }
+      )
+
+      this.modelLoaded = true
+      this.modelLoading = false
+      console.log('Local keyword extraction model ready')
+
+      if (this.progressCallback) {
+        this.progressCallback({ status: 'ready', message: 'Model ready' })
+      }
+
+    } catch (err) {
+      console.error('Failed to load local model:', err)
+      this.modelLoading = false
+      this.modelLoaded = false
+      this.useLocalModel = false
+
+      if (this.progressCallback) {
+        this.progressCallback({
+          status: 'error',
+          message: 'Failed to load local model, falling back to API',
+          error: err.message
+        })
+      }
+    }
   }
 
   /**
@@ -30,6 +104,83 @@ export default class KeywordExtractor {
 
       console.log('Extracting keywords from question:', question)
 
+      if (this.useLocalModel && !this.modelLoaded && !this.modelLoading) {
+        await this.initialize()
+      }
+
+      if (this.useLocalModel && this.modelLoaded) {
+        return await this._extractLocalLLM(question)
+      } else {
+        console.log('Using Perplexity API fallback for keyword extraction')
+        return await this._extractPerplexityAPI(question)
+      }
+
+    } catch (err) {
+      console.error('Error extracting keywords:', err)
+      return {
+        keywords: [],
+        error: err.message || 'Failed to extract keywords'
+      }
+    }
+  }
+
+  /**
+   * Extract keywords using local browser-based LLM
+   * @private
+   */
+  async _extractLocalLLM(question) {
+    try {
+      console.log('Using local LLM for keyword extraction')
+
+      const prompt = `<|im_start|>system
+You are a keyword extraction expert. Extract 3-7 main keywords from the question and provide 2-5 variations for each.
+Return ONLY valid JSON, nothing else.<|im_end|>
+<|im_start|>user
+Question: "${question}"
+
+Return JSON: {"keywords":[{"term":"word","variations":["syn1","syn2"]}]}
+
+JSON:<|im_end|>
+<|im_start|>assistant
+`
+
+      const output = await this.localGenerator(prompt, {
+        max_new_tokens: 250,
+        temperature: 0.3,
+        do_sample: false,
+        top_p: 0.9
+      })
+
+      const generatedText = output[0].generated_text
+
+      const jsonStart = generatedText.indexOf('{')
+      const jsonPart = jsonStart !== -1 ? generatedText.substring(jsonStart) : generatedText
+
+      const parsed = this._parseKeywordResponse(jsonPart)
+
+      if (!parsed.keywords || parsed.keywords.length === 0) {
+        console.warn('No keywords extracted by local model, using fallback')
+        return { keywords: [], error: null }
+      }
+
+      console.log(`Local LLM extracted ${parsed.keywords.length} keywords:`,
+        parsed.keywords.map(k => k.term).join(', '))
+
+      return { keywords: parsed.keywords, error: null }
+
+    } catch (err) {
+      console.error('Local LLM extraction failed:', err)
+      console.log('Falling back to Perplexity API')
+      return await this._extractPerplexityAPI(question)
+    }
+  }
+
+  /**
+   * Extract keywords using Perplexity API
+   * @private
+   */
+  async _extractPerplexityAPI(question) {
+    try {
       const prompt = `You are a keyword extraction expert. Analyze the following question and extract the main keywords and concepts.
 
 For each keyword, provide general synonyms and variations that someone might use when asking about the same concept.
@@ -76,11 +227,8 @@ Examples:
       return { keywords: parsed.keywords, error: null }
 
     } catch (err) {
-      console.error('Error extracting keywords:', err)
-      return {
-        keywords: [],
-        error: err.message || 'Failed to extract keywords'
-      }
+      console.error('Perplexity API extraction failed:', err)
+      throw err
     }
   }
 

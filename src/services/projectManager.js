@@ -33,7 +33,10 @@ export default class ProjectManager {
     this.ragRetriever = new RAGRetriever()
     this.perplexityAPI = new PerplexityAPI()
     this.pdfExtractor = new PDFExtractor()
-    this.keywordExtractor = new KeywordExtractor()
+    this.keywordExtractor = new KeywordExtractor({
+      useLocalModel: true,
+      progressCallback: null
+    })
     this.keywordSearcher = new KeywordSearcher()
     this.workerManager = new WorkerManager()
 
@@ -928,6 +931,22 @@ Any unexplained gap is explicitly acknowledged."When the user asks for 'preparat
     } catch (err) {
       throw new Error(`Failed to delete directory "${dirName}": ${err.message}`)
     }
+  }
+
+  /**
+   * Set progress callback for keyword extractor model loading
+   * @param {Function} callback - Progress callback function
+   */
+  setKeywordExtractorProgress(callback) {
+    this.keywordExtractor.progressCallback = callback
+  }
+
+  /**
+   * Pre-initialize the keyword extractor model
+   * Useful for preloading the model before first query
+   */
+  async initializeKeywordExtractor() {
+    return await this.keywordExtractor.initialize()
   }
 
   /**
