@@ -5,7 +5,7 @@ import { pipeline } from '@xenova/transformers'
  *
  * What are embeddings?
  * - Numerical representations of text that capture semantic meaning
- * - 384-dimensional vectors from the e5-small-v2 model
+ * - 384-dimensional vectors from the all-MiniLM-L6-v2 model
  * - Similar texts have similar embeddings (useful for similarity search)
  *
  * Why local embeddings?
@@ -18,7 +18,7 @@ import { pipeline } from '@xenova/transformers'
  * - Falls back to CPU (WASM) if GPU unavailable
  * - All processing still happens locally on your device
  *
- * First call is slow (downloads ~33MB model), subsequent calls are fast (cached in IndexedDB)
+ * First call is slow (downloads ~23MB model), subsequent calls are fast (cached in IndexedDB)
  */
 export default class EmbeddingGenerator {
   constructor() {
@@ -38,7 +38,7 @@ export default class EmbeddingGenerator {
 
   /**
    * Initialize the embedding model (lazy loading)
-   * Downloads the Xenova/e5-small-v2 model (~33MB) on first call
+   * Downloads the Xenova/all-MiniLM-L6-v2 model (~23MB) on first call
    * Subsequent calls use cached model from IndexedDB
    * Automatically uses WebGPU if available, falls back to WASM
    *
@@ -52,7 +52,7 @@ export default class EmbeddingGenerator {
 
     try {
       console.log('Initializing embedding model...')
-      console.log('Note: This will download ~33MB model on first call. Subsequent calls will be fast.')
+      console.log('Note: This will download ~23MB model on first call. Subsequent calls will be fast.')
 
       // Detect best available device
       const device = await this._detectDevice()
@@ -61,9 +61,9 @@ export default class EmbeddingGenerator {
       console.log(`Using device: ${device}`)
 
       // Load the feature extraction pipeline with device specification
-      // e5-small-v2: modern efficient model good for RAG tasks
-      // ~33MB download, 384-dimensional output
-      this.extractor = await pipeline('feature-extraction', 'Xenova/e5-small-v2', {
+      // all-MiniLM-L6-v2: popular, efficient model for semantic similarity
+      // ~23MB download, 384-dimensional output
+      this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
         device: device,
         dtype: device === 'webgpu' ? 'fp32' : 'q8'
       })
@@ -337,8 +337,8 @@ export default class EmbeddingGenerator {
    */
   getModelInfo() {
     return {
-      model: 'Xenova/e5-small-v2',
-      modelSize: '33MB',
+      model: 'Xenova/all-MiniLM-L6-v2',
+      modelSize: '23MB',
       embeddingDimension: 384,
       batchSize: 12,
       pooling: 'mean',
