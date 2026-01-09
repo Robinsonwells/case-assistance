@@ -89,6 +89,48 @@ export default class WorkerManager {
     })
   }
 
+  async generateEmbeddings(textArray, batchSize, onProgress) {
+    this.initialize()
+
+    const id = this.messageId++
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject, onProgress })
+      this.worker.postMessage({
+        type: 'generateEmbeddings',
+        data: { textArray, batchSize },
+        id
+      })
+    })
+  }
+
+  async generateSingleEmbedding(text) {
+    this.initialize()
+
+    const id = this.messageId++
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject })
+      this.worker.postMessage({
+        type: 'generateSingleEmbedding',
+        data: { text },
+        id
+      })
+    })
+  }
+
+  async initializeEmbeddings() {
+    this.initialize()
+
+    const id = this.messageId++
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject })
+      this.worker.postMessage({
+        type: 'initializeEmbeddings',
+        data: {},
+        id
+      })
+    })
+  }
+
   cancel() {
     if (this.worker) {
       this.worker.postMessage({ type: 'cancel' })

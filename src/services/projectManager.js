@@ -268,28 +268,29 @@ export default class ProjectManager {
       // Extract text from chunks for embedding
       const chunkTexts = chunks.map(chunk => chunk.text)
 
-      // Generate embeddings with async breaks for UI responsiveness
+      // Generate embeddings in Web Worker for UI responsiveness
       console.log(`Generating embeddings for ${chunks.length} chunks...`)
       onStageProgress('embedding', 'Generating embeddings...')
 
-      const embeddings = await this.embeddingGenerator.generateEmbeddings(chunkTexts, {
-        cancelled: this.currentUploadCancelled,
-        onProgress: (current, total, percentage) => {
-          onProgress(30 + (percentage * 0.6), 100)
+      const embeddings = await this.workerManager.generateEmbeddings(
+        chunkTexts,
+        undefined, // Use auto-detected batch size
+        (progressData) => {
+          if (progressData.type === 'embedding_progress') {
+            onProgress(30 + (progressData.percentage * 0.6), 100)
+          }
         }
-      })
+      )
 
       if (this.currentUploadCancelled.value) {
         throw new Error('Upload cancelled')
       }
 
       // Combine chunks with their embeddings
-      // Convert Float32Arrays to regular arrays for JSON serialization
+      // Embeddings from worker are already regular arrays
       const chunksWithEmbeddings = chunks.map((chunk, index) => ({
         ...chunk,
-        embedding: Array.isArray(embeddings[index])
-          ? embeddings[index]
-          : Array.from(embeddings[index])
+        embedding: embeddings[index]
       }))
 
       // Write to file system
@@ -485,7 +486,7 @@ export default class ProjectManager {
         question,
         chunks,
         100, // Get top 100 semantic chunks
-        this.embeddingGenerator
+        this.workerManager
       )
       console.log(`Retrieved ${semanticChunks.length} semantic chunks`)
 

@@ -1,11 +1,18 @@
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { pipeline, env } from '@xenova/transformers'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+
+// Configure transformers.js for Web Worker
+env.allowLocalModels = false
+env.useBrowserCache = true
 
 class FileProcessingWorker {
   constructor() {
     this.cancelled = false
+    this.embeddingExtractor = null
+    this.embeddingDevice = null
   }
 
   async extractPDFText(arrayBuffer, onProgress) {
@@ -234,6 +241,143 @@ class FileProcessingWorker {
     return chunks
   }
 
+  async initializeEmbeddings() {
+    if (this.embeddingExtractor) {
+      return { device: this.embeddingDevice }
+    }
+
+    try {
+      // Detect device capability
+      const device = await this.detectDevice()
+      this.embeddingDevice = device
+
+      // Try to load with appropriate dtype
+      let dtype = 'q8'
+      if (device === 'webgpu') {
+        try {
+          this.embeddingExtractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            device: device,
+            dtype: 'fp16'
+          })
+          dtype = 'fp16'
+        } catch (err) {
+          console.warn('fp16 not supported, falling back to fp32')
+          this.embeddingExtractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            device: device,
+            dtype: 'fp32'
+          })
+          dtype = 'fp32'
+        }
+      } else {
+        this.embeddingExtractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          device: device,
+          dtype: dtype
+        })
+      }
+
+      return { device, dtype }
+    } catch (err) {
+      throw new Error(`Failed to initialize embeddings: ${err.message}`)
+    }
+  }
+
+  async detectDevice() {
+    // Try WebGPU first
+    if (navigator.gpu) {
+      try {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            const adapter = await navigator.gpu.requestAdapter({
+              powerPreference: 'high-performance'
+            })
+            if (adapter) {
+              return 'webgpu'
+            }
+          } catch (err) {
+            if (attempt < 2) {
+              await new Promise(resolve => setTimeout(resolve, 500))
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('WebGPU not available:', err.message)
+      }
+    }
+
+    // Fall back to WASM
+    return 'wasm'
+  }
+
+  async generateEmbeddings(textArray, options = {}) {
+    try {
+      // Initialize model
+      await this.initializeEmbeddings()
+
+      const batchSize = options.batchSize || (this.embeddingDevice === 'webgpu' ? 32 : 16)
+      const embeddings = []
+      const totalBatches = Math.ceil(textArray.length / batchSize)
+      let processed = 0
+      let lastLoggedPercentage = -1
+
+      // Process in batches
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+        if (this.cancelled) {
+          throw new Error('Embedding generation cancelled')
+        }
+
+        // Get batch slice
+        const start = batchIndex * batchSize
+        const end = Math.min(start + batchSize, textArray.length)
+        const batch = textArray.slice(start, end)
+
+        // Process batch in parallel
+        const batchResults = await Promise.all(
+          batch.map(text => this.generateSingleEmbedding(text))
+        )
+
+        // Convert Float32Arrays to regular arrays for transfer
+        embeddings.push(...batchResults.map(arr => Array.from(arr)))
+
+        // Update progress
+        processed = end
+        const percentage = Math.round((processed / textArray.length) * 100)
+
+        // Report progress only when percentage changes
+        if (percentage !== lastLoggedPercentage && options.onProgress) {
+          options.onProgress({
+            type: 'embedding_progress',
+            current: processed,
+            total: textArray.length,
+            percentage
+          })
+          lastLoggedPercentage = percentage
+        }
+
+        // Yield every few batches
+        if (batchIndex % 3 === 0 && batchIndex < totalBatches - 1) {
+          await this.yieldToMainThread()
+        }
+      }
+
+      return embeddings
+    } catch (err) {
+      throw new Error(`Failed to generate embeddings: ${err.message}`)
+    }
+  }
+
+  async generateSingleEmbedding(text) {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Text must be a non-empty string')
+    }
+
+    const result = await this.embeddingExtractor(text, {
+      pooling: 'mean',
+      normalize: true
+    })
+
+    return result.data
+  }
+
   async yieldToMainThread() {
     return new Promise(resolve => setTimeout(resolve, 0))
   }
@@ -273,6 +417,25 @@ self.onmessage = async (e) => {
           self.postMessage({ type: 'progress', data: progress, id })
         }
       )
+      self.postMessage({ type: 'success', data: result, id })
+    } else if (type === 'generateEmbeddings') {
+      const result = await workerInstance.generateEmbeddings(
+        data.textArray,
+        {
+          batchSize: data.batchSize,
+          onProgress: (progress) => {
+            self.postMessage({ type: 'progress', data: progress, id })
+          }
+        }
+      )
+      self.postMessage({ type: 'success', data: result, id })
+    } else if (type === 'generateSingleEmbedding') {
+      await workerInstance.initializeEmbeddings()
+      const embedding = await workerInstance.generateSingleEmbedding(data.text)
+      // Convert Float32Array to regular array for transfer
+      self.postMessage({ type: 'success', data: Array.from(embedding), id })
+    } else if (type === 'initializeEmbeddings') {
+      const result = await workerInstance.initializeEmbeddings()
       self.postMessage({ type: 'success', data: result, id })
     } else if (type === 'cancel') {
       workerInstance.cancel()

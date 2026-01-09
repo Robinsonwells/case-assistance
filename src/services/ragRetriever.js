@@ -44,10 +44,10 @@ export default class RAGRetriever {
    * @param {string} question - User's question
    * @param {array} chunks - Array of chunk objects with 'text' and 'embedding' property
    * @param {number} topK - Number of top chunks to return (default: 15)
-   * @param {object} embeddingGenerator - EmbeddingGenerator instance (required)
+   * @param {object} workerManager - WorkerManager instance (required)
    * @returns {Promise<array>} - Top K relevant chunks with scores, sorted by relevance
    */
-  async findRelevantChunks(question, chunks, topK = 15, embeddingGenerator = null) {
+  async findRelevantChunks(question, chunks, topK = 15, workerManager = null) {
     try {
       // Validate inputs
       if (!question || typeof question !== 'string') {
@@ -58,9 +58,9 @@ export default class RAGRetriever {
         throw new Error('Chunks array must not be empty')
       }
 
-      // Validate embeddingGenerator
-      if (!embeddingGenerator || !embeddingGenerator.isInitialized()) {
-        throw new Error('Initialized EmbeddingGenerator is required for semantic search')
+      // Validate workerManager
+      if (!workerManager || typeof workerManager.generateSingleEmbedding !== 'function') {
+        throw new Error('WorkerManager is required for semantic search')
       }
 
       // Validate topK
@@ -74,8 +74,8 @@ export default class RAGRetriever {
 
       console.log(`Finding ${topK} most relevant chunks from ${chunks.length} total chunks using semantic search`)
 
-      // Step 1: Generate question embedding
-      const questionEmbedding = await embeddingGenerator.generateEmbedding(question)
+      // Step 1: Generate question embedding using Web Worker
+      const questionEmbedding = await workerManager.generateSingleEmbedding(question)
       console.log(`Generated question embedding (dimension: ${questionEmbedding.length})`)
 
       // Step 2: Ensure all chunks have embeddings
