@@ -9,11 +9,40 @@ export default function ProjectEditor({ projectName, projectManager }) {
   const [error, setError] = useState('')
   const [chunkCount, setChunkCount] = useState(0)
   const [activeTab, setActiveTab] = useState('knowledge')
+  const [gpuStatus, setGpuStatus] = useState(null)
 
   // Load project metadata on mount
   useEffect(() => {
     loadProjectMetadata()
   }, [projectName])
+
+  // Try to upgrade to WebGPU when returning to knowledge tab
+  useEffect(() => {
+    if (activeTab === 'knowledge' && projectManager) {
+      const tryUpgrade = async () => {
+        try {
+          const upgraded = await projectManager.embeddingGenerator.tryUpgradeToWebGPU()
+          if (upgraded) {
+            console.log('Successfully upgraded to WebGPU!')
+          }
+
+          // Update GPU status
+          const modelInfo = projectManager.embeddingGenerator.getModelInfo()
+          setGpuStatus({
+            device: modelInfo.device,
+            accelerated: modelInfo.gpuAccelerated
+          })
+        } catch (err) {
+          console.warn('Failed to upgrade to WebGPU:', err)
+          setGpuStatus({
+            device: 'unknown',
+            accelerated: false
+          })
+        }
+      }
+      tryUpgrade()
+    }
+  }, [activeTab, projectManager])
 
   const loadProjectMetadata = async () => {
     try {
@@ -144,7 +173,7 @@ export default function ProjectEditor({ projectName, projectManager }) {
 
             {/* Project metadata */}
             {projectMetadata && (
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid grid-cols-5 gap-4">
                 <div className="p-4 bg-slate-700/50 rounded-lg border border-slate-600">
                   <p className="text-slate-400 text-xs font-medium mb-1">Created</p>
                   <p className="text-white font-semibold text-lg">{projectMetadata.createdAt}</p>
@@ -161,6 +190,27 @@ export default function ProjectEditor({ projectName, projectManager }) {
                   <p className="text-slate-400 text-xs font-medium mb-1">Last Queried</p>
                   <p className="text-white font-semibold text-lg">
                     {projectMetadata.lastQueried || '—'}
+                  </p>
+                </div>
+                <div className={`p-4 rounded-lg border ${
+                  gpuStatus?.accelerated
+                    ? 'bg-green-900/20 border-green-700/50'
+                    : 'bg-slate-700/50 border-slate-600'
+                }`}>
+                  <p className="text-slate-400 text-xs font-medium mb-1">Processing</p>
+                  <p className="text-white font-semibold text-lg flex items-center gap-2">
+                    {gpuStatus?.accelerated ? (
+                      <>
+                        <svg className="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        GPU
+                      </>
+                    ) : gpuStatus?.device === 'wasm' ? (
+                      <>CPU</>
+                    ) : (
+                      <>—</>
+                    )}
                   </p>
                 </div>
               </div>

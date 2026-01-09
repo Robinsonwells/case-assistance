@@ -77,6 +77,66 @@ export default class EmbeddingGenerator {
   }
 
   /**
+   * Force reinitialization of the model
+   * Useful for switching devices or recovering from errors
+   *
+   * @returns {Promise<void>}
+   */
+  async reinitialize() {
+    console.log('Forcing model reinitialization...')
+
+    // Dispose of existing model
+    if (this.extractor) {
+      try {
+        // Try to dispose of the pipeline if it has a dispose method
+        if (typeof this.extractor.dispose === 'function') {
+          await this.extractor.dispose()
+        }
+      } catch (err) {
+        console.warn('Error disposing model:', err.message)
+      }
+    }
+
+    // Reset state
+    this.extractor = null
+    this.initialized = false
+    this.device = null
+
+    // Reinitialize with new device detection
+    await this.initialize()
+  }
+
+  /**
+   * Check if WebGPU is available and switch to it if currently using WASM
+   * Returns true if switched to WebGPU, false otherwise
+   *
+   * @returns {Promise<boolean>}
+   */
+  async tryUpgradeToWebGPU() {
+    // Already using WebGPU
+    if (this.device === 'webgpu') {
+      console.log('Already using WebGPU')
+      return false
+    }
+
+    // Check if WebGPU is available
+    if (navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter()
+        if (adapter) {
+          console.log('WebGPU is now available! Upgrading from WASM to WebGPU...')
+          await this.reinitialize()
+          return this.device === 'webgpu'
+        }
+      } catch (err) {
+        console.log('WebGPU still not available:', err.message)
+      }
+    }
+
+    return false
+  }
+
+  /**
    * Detect the best available compute device
    * Priority: WebGPU (fastest) -> WASM (fallback)
    *
@@ -84,25 +144,38 @@ export default class EmbeddingGenerator {
    * @returns {Promise<string>} - Device identifier ('webgpu' or 'wasm')
    */
   async _detectDevice() {
-    // Check for WebGPU support
+    // Check for WebGPU support with retry logic
     if (navigator.gpu) {
-      try {
-        const adapter = await navigator.gpu.requestAdapter()
-        if (adapter) {
-          const info = await adapter.requestAdapterInfo?.()
-          console.log('WebGPU detected - GPU acceleration enabled')
-          if (info) {
-            console.log(`GPU: ${info.vendor} ${info.architecture || info.device || ''}`)
+      // Try multiple times with delays in case GPU is initializing
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter({
+            powerPreference: 'high-performance'
+          })
+
+          if (adapter) {
+            const info = await adapter.requestAdapterInfo?.()
+            console.log('WebGPU detected - GPU acceleration enabled')
+            if (info) {
+              console.log(`GPU: ${info.vendor} ${info.architecture || info.device || ''}`)
+            }
+            return 'webgpu'
+          } else {
+            console.warn(`WebGPU attempt ${attempt + 1}/3: No adapter available`)
+            if (attempt < 2) {
+              await new Promise(resolve => setTimeout(resolve, 500))
+            }
           }
-          return 'webgpu'
-        } else {
-          console.warn('WebGPU: navigator.gpu exists but no adapter available')
-          console.warn('Check chrome://gpu for details')
+        } catch (err) {
+          console.warn(`WebGPU attempt ${attempt + 1}/3 failed:`, err.message)
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 500))
+          }
         }
-      } catch (err) {
-        console.warn('WebGPU available but failed to initialize:', err.message)
-        console.warn('Try: 1) Update GPU drivers 2) Enable chrome://flags/#enable-unsafe-webgpu')
       }
+
+      console.warn('WebGPU: Failed after 3 attempts')
+      console.warn('Try: 1) Update GPU drivers 2) Enable chrome://flags/#enable-unsafe-webgpu 3) Check chrome://gpu')
     } else {
       console.log('WebGPU not available in this browser')
       console.log('WebGPU requires Chrome 113+, Edge 113+, or Safari 18+')
