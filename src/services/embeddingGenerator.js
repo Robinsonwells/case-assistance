@@ -63,10 +63,32 @@ export default class EmbeddingGenerator {
       // Load the feature extraction pipeline with device specification
       // all-MiniLM-L6-v2: popular, efficient model for semantic similarity
       // ~23MB download, 384-dimensional output
-      this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-        device: device,
-        dtype: device === 'webgpu' ? 'fp32' : 'q8'
-      })
+      // Use fp16 for WebGPU (faster), q8 for WASM (smaller)
+      let dtype = 'q8'
+      if (device === 'webgpu') {
+        try {
+          // Try fp16 first for better performance
+          this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            device: device,
+            dtype: 'fp16'
+          })
+          dtype = 'fp16'
+          console.log('Using fp16 precision for WebGPU')
+        } catch (err) {
+          console.warn('fp16 not supported, falling back to fp32:', err.message)
+          // Fall back to fp32 if fp16 fails
+          this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+            device: device,
+            dtype: 'fp32'
+          })
+          dtype = 'fp32'
+        }
+      } else {
+        this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          device: device,
+          dtype: dtype
+        })
+      }
 
       this.initialized = true
       console.log(`Embedding model initialized successfully on ${device}`)
@@ -195,10 +217,10 @@ export default class EmbeddingGenerator {
    * 2. Extract features from text
    * 3. Apply mean pooling to get single vector
    * 4. Normalize to unit length
-   * 5. Convert to array and return
+   * 5. Return Float32Array directly
    *
    * @param {string} text - Text to embed
-   * @returns {Promise<array>} - 384-dimensional embedding vector
+   * @returns {Promise<Float32Array>} - 384-dimensional embedding vector
    */
   async generateEmbedding(text) {
     try {
@@ -218,12 +240,9 @@ export default class EmbeddingGenerator {
         normalize: true
       })
 
-      // Convert tensor data to array
-      // result.data is a Float32Array, convert to regular array
-      const embedding = Array.from(result.data)
-
-      console.log(`Generated embedding for text (length: ${text.length})`)
-      return embedding
+      // Return typed array directly (no conversion to JS array)
+      // Faster and uses less memory
+      return result.data
     } catch (err) {
       console.error('Error generating embedding:', err)
       throw new Error(`Failed to generate embedding: ${err.message}`)
@@ -231,13 +250,14 @@ export default class EmbeddingGenerator {
   }
 
   /**
-   * Generate embeddings for multiple texts one at a time
-   * Processes each text individually for consistency
+   * Generate embeddings for multiple texts with micro-batching
+   * Processes texts in small batches for optimal performance
    *
    * @param {array} textArray - Array of text strings to embed
    * @param {object} options - Configuration options
    * @param {function} options.onProgress - Progress callback function(current, total, percentage)
-   * @returns {Promise<array>} - Array of embedding vectors
+   * @param {number} options.batchSize - Number of texts to process per batch (default: auto-detect)
+   * @returns {Promise<array>} - Array of embedding vectors (Float32Arrays)
    */
   async generateEmbeddings(textArray, options = {}) {
     try {
@@ -260,40 +280,57 @@ export default class EmbeddingGenerator {
       const onProgress = options.onProgress || (() => {})
       const cancelled = options.cancelled || { value: false }
 
-      console.log(`Generating ${textArray.length} embeddings one at a time...`)
+      // Auto-detect optimal batch size based on device
+      // WebGPU can handle larger batches, WASM benefits from smaller batches
+      const defaultBatchSize = this.device === 'webgpu' ? 32 : 16
+      const batchSize = options.batchSize || defaultBatchSize
+
+      console.log(`Generating ${textArray.length} embeddings with batch size ${batchSize} on ${this.device}...`)
 
       // Initialize model once for all embeddings
       await this.initialize()
 
       const embeddings = []
+      const totalBatches = Math.ceil(textArray.length / batchSize)
+      let processed = 0
+      let lastLoggedPercentage = -1
 
-      for (let i = 0; i < textArray.length; i++) {
+      for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
         // Check for cancellation
         if (cancelled.value) {
           throw new Error('Embedding generation cancelled')
         }
 
-        // Process one chunk at a time
-        const embedding = await this._generateEmbeddingWithRetry(textArray[i])
-        embeddings.push(embedding)
+        // Get batch slice
+        const start = batchIndex * batchSize
+        const end = Math.min(start + batchSize, textArray.length)
+        const batch = textArray.slice(start, end)
 
-        // Calculate progress
-        const processed = i + 1
+        // Process batch - transformers.js will automatically batch internally
+        // if we pass an array
+        const batchResults = await this._generateBatchEmbeddingsWithRetry(batch)
+        embeddings.push(...batchResults)
+
+        // Update progress
+        processed = end
         const percentage = Math.round((processed / textArray.length) * 100)
 
-        // Log progress
-        console.log(`Chunk ${processed}/${textArray.length} embeddings (${percentage}%)`)
+        // Log only when percentage changes (reduces console spam)
+        if (percentage !== lastLoggedPercentage) {
+          console.log(`Embeddings: ${processed}/${textArray.length} (${percentage}%)`)
+          lastLoggedPercentage = percentage
+        }
 
         // Call progress callback
         onProgress(processed, textArray.length, percentage)
 
-        // Yield to main thread after each chunk for UI updates
-        if (i < textArray.length - 1) {
-          await this._yieldToMainThread(10)
+        // Yield to main thread every few batches (not every chunk)
+        if (batchIndex % 3 === 0 && batchIndex < totalBatches - 1) {
+          await this._yieldToMainThread(0)
         }
       }
 
-      console.log(`Successfully generated ${embeddings.length} embeddings`)
+      console.log(`✓ Generated ${embeddings.length} embeddings using ${this.device}`)
       return embeddings
     } catch (err) {
       console.error('Error generating embeddings:', err)
@@ -302,29 +339,96 @@ export default class EmbeddingGenerator {
   }
 
   /**
+   * Generate embeddings for a batch of texts with retry logic
+   *
+   * @private
+   * @param {array} textBatch - Array of text strings to embed
+   * @returns {Promise<array>} - Array of Float32Array embeddings
+   */
+  async _generateBatchEmbeddingsWithRetry(textBatch) {
+    let lastError = null
+
+    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+      try {
+        // Process batch through the model
+        const results = await Promise.all(
+          textBatch.map(text => this._generateEmbeddingRaw(text))
+        )
+        return results
+      } catch (err) {
+        lastError = err
+
+        // Only retry on specific transient errors
+        const isTransient = err.message.includes('timeout') ||
+                           err.message.includes('network') ||
+                           err.message.includes('GPU context')
+
+        if (!isTransient || attempt === this.maxRetries - 1) {
+          throw err
+        }
+
+        // Shorter retry delay (100ms instead of 1000ms)
+        console.warn(`Batch embedding attempt ${attempt + 1} failed, retrying in 100ms...`)
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+    }
+
+    throw lastError
+  }
+
+  /**
+   * Generate single embedding without retry (raw operation)
+   * Returns Float32Array directly for better performance
+   *
+   * @private
+   * @param {string} text - Text to embed
+   * @returns {Promise<Float32Array>} - Embedding vector
+   */
+  async _generateEmbeddingRaw(text) {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Text must be a non-empty string')
+    }
+
+    // Extract features with pooling and normalization
+    const result = await this.extractor(text, {
+      pooling: 'mean',
+      normalize: true
+    })
+
+    // Return typed array directly (no conversion to JS array)
+    // This saves memory and allocation overhead
+    return result.data
+  }
+
+  /**
    * Generate embedding with retry logic
    * Handles transient failures during embedding generation
    *
    * @private
    * @param {string} text - Text to embed
-   * @returns {Promise<array>} - Embedding vector
+   * @returns {Promise<Float32Array>} - Embedding vector
    */
   async _generateEmbeddingWithRetry(text, retryCount = 0) {
     try {
       return await this.generateEmbedding(text)
     } catch (err) {
-      if (retryCount < this.maxRetries) {
+      // Only retry on specific transient errors
+      const isTransient = err.message.includes('timeout') ||
+                         err.message.includes('network') ||
+                         err.message.includes('GPU context')
+
+      if (isTransient && retryCount < this.maxRetries) {
         console.warn(
           `Retry ${retryCount + 1}/${this.maxRetries} for embedding generation:`,
           err.message
         )
 
-        // Wait before retrying
-        await new Promise(resolve => setTimeout(resolve, this.retryDelay))
+        // Shorter retry delay (100ms instead of 1000ms)
+        await new Promise(resolve => setTimeout(resolve, 100))
 
         return this._generateEmbeddingWithRetry(text, retryCount + 1)
       } else {
-        throw new Error(`Failed to generate embedding after ${this.maxRetries} retries: ${err.message}`)
+        throw new Error(`Failed to generate embedding: ${err.message}`)
       }
     }
   }

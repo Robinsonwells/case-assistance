@@ -24,10 +24,10 @@ export default class ProjectManager {
     // Service instances
     this.paragraphChunker = new DocumentChunker()
     this.tokenChunker = new TokenChunker({
-      targetTokens: 1000,
-      maxTokens: 1200,
-      minTokens: 600,
-      overlapTokens: 300
+      targetTokens: 400,      // Reduced from 1000 for faster embedding generation
+      maxTokens: 500,         // Reduced from 1200
+      minTokens: 250,         // Reduced from 600
+      overlapTokens: 50       // Reduced from 300 to minimize redundant embeddings
     })
     this.embeddingGenerator = new EmbeddingGenerator()
     this.ragRetriever = new RAGRetriever()
@@ -284,9 +284,12 @@ export default class ProjectManager {
       }
 
       // Combine chunks with their embeddings
+      // Convert Float32Arrays to regular arrays for JSON serialization
       const chunksWithEmbeddings = chunks.map((chunk, index) => ({
         ...chunk,
-        embedding: embeddings[index]
+        embedding: Array.isArray(embeddings[index])
+          ? embeddings[index]
+          : Array.from(embeddings[index])
       }))
 
       // Write to file system

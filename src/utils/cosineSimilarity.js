@@ -27,29 +27,31 @@
 
 /**
  * Calculate cosine similarity between two vectors
- * 
+ *
  * Formula: similarity = (a · b) / (||a|| * ||b||)
- * 
+ *
  * This metric measures the angle between two vectors, treating them as directions
  * regardless of their magnitude. Perfect for comparing text embeddings.
- * 
+ *
  * Interpretation:
  * - 1.0 = identical direction (most similar)
  * - 0.0 = orthogonal (completely different)
  * - -1.0 = opposite direction (least similar)
- * 
+ *
  * Note: With normalized embeddings (from transformers), result is typically [0, 1]
- * 
- * @param {array<number>} vectorA - First embedding vector
- * @param {array<number>} vectorB - Second embedding vector
+ *
+ * @param {array<number>|Float32Array} vectorA - First embedding vector
+ * @param {array<number>|Float32Array} vectorB - Second embedding vector
  * @returns {number} - Cosine similarity score [-1, 1]
  * @throws {Error} - If inputs are invalid
  */
 export function cosineSimilarity(vectorA, vectorB) {
   try {
-    // Input validation
-    if (!Array.isArray(vectorA) || !Array.isArray(vectorB)) {
-      throw new Error('Both inputs must be arrays')
+    // Input validation - accept both arrays and typed arrays
+    const isValidVector = (v) => (Array.isArray(v) || ArrayBuffer.isView(v)) && v.length > 0
+
+    if (!isValidVector(vectorA) || !isValidVector(vectorB)) {
+      throw new Error('Both inputs must be arrays or typed arrays')
     }
 
     if (vectorA.length !== vectorB.length) {
@@ -60,12 +62,13 @@ export function cosineSimilarity(vectorA, vectorB) {
       throw new Error('Vectors cannot be empty')
     }
 
-    // Validate all elements are numbers
-    if (!vectorA.every(v => typeof v === 'number' && isFinite(v))) {
+    // For typed arrays, validation is implicit (they only contain numbers)
+    // Only validate if it's a regular array
+    if (Array.isArray(vectorA) && !vectorA.every(v => typeof v === 'number' && isFinite(v))) {
       throw new Error('Vector A contains non-numeric or infinite values')
     }
 
-    if (!vectorB.every(v => typeof v === 'number' && isFinite(v))) {
+    if (Array.isArray(vectorB) && !vectorB.every(v => typeof v === 'number' && isFinite(v))) {
       throw new Error('Vector B contains non-numeric or infinite values')
     }
 
