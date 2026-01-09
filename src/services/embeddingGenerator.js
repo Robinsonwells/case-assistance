@@ -2,18 +2,18 @@ import { pipeline } from '@xenova/transformers'
 
 /**
  * EmbeddingGenerator - Converts text to vector embeddings using transformers.js
- * 
+ *
  * What are embeddings?
  * - Numerical representations of text that capture semantic meaning
- * - 768-dimensional vectors from the all-MiniLM-L6-v2 model
+ * - 384-dimensional vectors from the e5-small-v2 model
  * - Similar texts have similar embeddings (useful for similarity search)
- * 
+ *
  * Why local embeddings?
  * - Privacy: All processing happens in the browser, no data sent to server
  * - Speed: No network latency after initial model download
  * - Cost: No API charges
- * 
- * First call is slow (downloads ~23MB model), subsequent calls are fast (cached in IndexedDB)
+ *
+ * First call is slow (downloads ~33MB model), subsequent calls are fast (cached in IndexedDB)
  */
 export default class EmbeddingGenerator {
   constructor() {
@@ -30,9 +30,9 @@ export default class EmbeddingGenerator {
 
   /**
    * Initialize the embedding model (lazy loading)
-   * Downloads the Xenova/all-MiniLM-L6-v2 model (~23MB) on first call
+   * Downloads the Xenova/e5-small-v2 model (~33MB) on first call
    * Subsequent calls use cached model from IndexedDB
-   * 
+   *
    * @returns {Promise<void>}
    */
   async initialize() {
@@ -43,12 +43,12 @@ export default class EmbeddingGenerator {
 
     try {
       console.log('Initializing embedding model...')
-      console.log('Note: This will download ~23MB model on first call. Subsequent calls will be fast.')
+      console.log('Note: This will download ~33MB model on first call. Subsequent calls will be fast.')
 
       // Load the feature extraction pipeline
-      // all-MiniLM-L6-v2: lightweight model good for RAG tasks
-      // ~23MB download, 768-dimensional output
-      this.extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+      // e5-small-v2: modern efficient model good for RAG tasks
+      // ~33MB download, 384-dimensional output
+      this.extractor = await pipeline('feature-extraction', 'Xenova/e5-small-v2')
 
       this.initialized = true
       console.log('Embedding model initialized successfully')
@@ -60,16 +60,16 @@ export default class EmbeddingGenerator {
 
   /**
    * Generate a single embedding for text
-   * 
+   *
    * Process:
    * 1. Initialize model if needed
    * 2. Extract features from text
    * 3. Apply mean pooling to get single vector
    * 4. Normalize to unit length
    * 5. Convert to array and return
-   * 
+   *
    * @param {string} text - Text to embed
-   * @returns {Promise<array>} - 768-dimensional embedding vector
+   * @returns {Promise<array>} - 384-dimensional embedding vector
    */
   async generateEmbedding(text) {
     try {
@@ -102,12 +102,12 @@ export default class EmbeddingGenerator {
   }
 
   /**
-   * Generate embeddings for multiple texts with memory-efficient batch processing
-   * Processes in parallel batches (50 at a time by default) to prevent memory crashes
+   * Generate embeddings for multiple texts with batch processing
+   * Processes 12 texts at a time for optimal performance
    *
    * @param {array} textArray - Array of text strings to embed
    * @param {object} options - Configuration options
-   * @param {number} options.batchSize - Chunks to process per batch (default: 50)
+   * @param {number} options.batchSize - Chunks to process per batch (default: 12)
    * @param {function} options.onProgress - Progress callback function(current, total, percentage)
    * @returns {Promise<array>} - Array of embedding vectors
    */
@@ -129,8 +129,7 @@ export default class EmbeddingGenerator {
       }
 
       // Extract options with defaults
-      // Use smaller batch size for better UI responsiveness
-      const batchSize = options.batchSize || 25
+      const batchSize = options.batchSize || 12
       const onProgress = options.onProgress || (() => {})
       const cancelled = options.cancelled || { value: false }
 
@@ -151,20 +150,9 @@ export default class EmbeddingGenerator {
         const batch = textArray.slice(i, i + batchSize)
         const currentBatch = Math.floor(i / batchSize) + 1
 
-        // Process batch items one at a time with yield points for better responsiveness
-        for (let j = 0; j < batch.length; j++) {
-          if (cancelled.value) {
-            throw new Error('Embedding generation cancelled')
-          }
-
-          const embedding = await this._generateEmbeddingWithRetry(batch[j])
-          embeddings.push(embedding)
-
-          // Yield to main thread every 5 embeddings
-          if ((embeddings.length % 5) === 0) {
-            await this._yieldToMainThread()
-          }
-        }
+        // Process entire batch at once using the model's batch processing
+        const batchEmbeddings = await this._generateBatchEmbeddingsWithRetry(batch)
+        embeddings.push(...batchEmbeddings)
 
         // Calculate progress
         const processed = Math.min(i + batchSize, textArray.length)
@@ -176,9 +164,9 @@ export default class EmbeddingGenerator {
         // Call progress callback
         onProgress(processed, textArray.length, percentage)
 
-        // Longer delay between batches to allow UI updates and garbage collection
+        // Yield to main thread between batches for UI updates
         if (i + batchSize < textArray.length) {
-          await this._yieldToMainThread(200)
+          await this._yieldToMainThread(100)
         }
       }
 
@@ -193,7 +181,7 @@ export default class EmbeddingGenerator {
   /**
    * Generate embedding with retry logic
    * Handles transient failures during embedding generation
-   * 
+   *
    * @private
    * @param {string} text - Text to embed
    * @returns {Promise<array>} - Embedding vector
@@ -219,6 +207,55 @@ export default class EmbeddingGenerator {
   }
 
   /**
+   * Generate embeddings for a batch of texts with retry logic
+   * Processes multiple texts at once for better performance
+   *
+   * @private
+   * @param {array} textBatch - Array of texts to embed
+   * @returns {Promise<array>} - Array of embedding vectors
+   */
+  async _generateBatchEmbeddingsWithRetry(textBatch, retryCount = 0) {
+    try {
+      // Ensure model is initialized
+      await this.initialize()
+
+      // Process batch through the model
+      const result = await this.extractor(textBatch, {
+        pooling: 'mean',
+        normalize: true
+      })
+
+      // Extract embeddings from result
+      // For batch processing, result.data contains all embeddings concatenated
+      const embeddings = []
+      const embeddingDim = 384
+
+      for (let i = 0; i < textBatch.length; i++) {
+        const start = i * embeddingDim
+        const end = start + embeddingDim
+        const embedding = Array.from(result.data.slice(start, end))
+        embeddings.push(embedding)
+      }
+
+      return embeddings
+    } catch (err) {
+      if (retryCount < this.maxRetries) {
+        console.warn(
+          `Retry ${retryCount + 1}/${this.maxRetries} for batch embedding generation:`,
+          err.message
+        )
+
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, this.retryDelay))
+
+        return this._generateBatchEmbeddingsWithRetry(textBatch, retryCount + 1)
+      } else {
+        throw new Error(`Failed to generate batch embeddings after ${this.maxRetries} retries: ${err.message}`)
+      }
+    }
+  }
+
+  /**
    * Yield control to the main thread to allow UI updates
    * @private
    */
@@ -239,14 +276,15 @@ export default class EmbeddingGenerator {
   /**
    * Get model information
    * Useful for debugging and diagnostics
-   * 
+   *
    * @returns {object} - Model information
    */
   getModelInfo() {
     return {
-      model: 'Xenova/all-MiniLM-L6-v2',
-      modelSize: '23MB',
-      embeddingDimension: 768,
+      model: 'Xenova/e5-small-v2',
+      modelSize: '33MB',
+      embeddingDimension: 384,
+      batchSize: 12,
       pooling: 'mean',
       normalized: true,
       initialized: this.initialized,
