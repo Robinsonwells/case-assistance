@@ -13,6 +13,11 @@ import { pipeline } from '@xenova/transformers'
  * - Speed: No network latency after initial model download
  * - Cost: No API charges
  *
+ * WebGPU Acceleration:
+ * - Uses GPU when available for 5-10x faster embedding generation
+ * - Falls back to CPU (WASM) if GPU unavailable
+ * - All processing still happens locally on your device
+ *
  * First call is slow (downloads ~33MB model), subsequent calls are fast (cached in IndexedDB)
  */
 export default class EmbeddingGenerator {
@@ -23,6 +28,9 @@ export default class EmbeddingGenerator {
     // Track initialization state to avoid duplicate loads
     this.initialized = false
 
+    // Track which device is being used
+    this.device = null
+
     // Retry configuration
     this.maxRetries = 3
     this.retryDelay = 1000
@@ -32,6 +40,7 @@ export default class EmbeddingGenerator {
    * Initialize the embedding model (lazy loading)
    * Downloads the Xenova/e5-small-v2 model (~33MB) on first call
    * Subsequent calls use cached model from IndexedDB
+   * Automatically uses WebGPU if available, falls back to WASM
    *
    * @returns {Promise<void>}
    */
@@ -45,17 +54,52 @@ export default class EmbeddingGenerator {
       console.log('Initializing embedding model...')
       console.log('Note: This will download ~33MB model on first call. Subsequent calls will be fast.')
 
-      // Load the feature extraction pipeline
+      // Detect best available device
+      const device = await this._detectDevice()
+      this.device = device
+
+      console.log(`Using device: ${device}`)
+
+      // Load the feature extraction pipeline with device specification
       // e5-small-v2: modern efficient model good for RAG tasks
       // ~33MB download, 384-dimensional output
-      this.extractor = await pipeline('feature-extraction', 'Xenova/e5-small-v2')
+      this.extractor = await pipeline('feature-extraction', 'Xenova/e5-small-v2', {
+        device: device,
+        dtype: device === 'webgpu' ? 'fp32' : 'q8'
+      })
 
       this.initialized = true
-      console.log('Embedding model initialized successfully')
+      console.log(`Embedding model initialized successfully on ${device}`)
     } catch (err) {
       console.error('Failed to initialize embedding model:', err)
       throw new Error(`Failed to initialize embedding model: ${err.message}`)
     }
+  }
+
+  /**
+   * Detect the best available compute device
+   * Priority: WebGPU (fastest) -> WASM (fallback)
+   *
+   * @private
+   * @returns {Promise<string>} - Device identifier ('webgpu' or 'wasm')
+   */
+  async _detectDevice() {
+    // Check for WebGPU support
+    if (navigator.gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter()
+        if (adapter) {
+          console.log('WebGPU detected - GPU acceleration enabled')
+          return 'webgpu'
+        }
+      } catch (err) {
+        console.warn('WebGPU available but failed to initialize:', err.message)
+      }
+    }
+
+    // Fallback to WASM
+    console.log('WebGPU not available - using CPU (WASM)')
+    return 'wasm'
   }
 
   /**
@@ -287,6 +331,8 @@ export default class EmbeddingGenerator {
       batchSize: 12,
       pooling: 'mean',
       normalized: true,
+      device: this.device || 'not detected',
+      gpuAccelerated: this.device === 'webgpu',
       initialized: this.initialized,
       status: this.initialized ? 'ready' : 'not initialized'
     }
