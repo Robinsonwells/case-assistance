@@ -89,16 +89,28 @@ export default class EmbeddingGenerator {
       try {
         const adapter = await navigator.gpu.requestAdapter()
         if (adapter) {
+          const info = await adapter.requestAdapterInfo?.()
           console.log('WebGPU detected - GPU acceleration enabled')
+          if (info) {
+            console.log(`GPU: ${info.vendor} ${info.architecture || info.device || ''}`)
+          }
           return 'webgpu'
+        } else {
+          console.warn('WebGPU: navigator.gpu exists but no adapter available')
+          console.warn('Check chrome://gpu for details')
         }
       } catch (err) {
         console.warn('WebGPU available but failed to initialize:', err.message)
+        console.warn('Try: 1) Update GPU drivers 2) Enable chrome://flags/#enable-unsafe-webgpu')
       }
+    } else {
+      console.log('WebGPU not available in this browser')
+      console.log('WebGPU requires Chrome 113+, Edge 113+, or Safari 18+')
+      console.log('Check chrome://gpu to see if WebGPU is supported')
     }
 
     // Fallback to WASM
-    console.log('WebGPU not available - using CPU (WASM)')
+    console.log('Using CPU (WASM) - embeddings will be slower but still work')
     return 'wasm'
   }
 
