@@ -6,8 +6,6 @@ export default function KnowledgeBasePanel({ projectManager, projectName, onFile
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [deleting, setDeleting] = useState(null)
-  const [expandedFile, setExpandedFile] = useState(null)
-  const [fileChunks, setFileChunks] = useState([])
 
   useEffect(() => {
     loadFiles()
@@ -65,27 +63,6 @@ export default function KnowledgeBasePanel({ projectManager, projectName, onFile
       setError('Failed to delete file: ' + err.message)
     } finally {
       setDeleting(null)
-    }
-  }
-
-  const handleToggleChunks = async (internalName) => {
-    if (expandedFile === internalName) {
-      setExpandedFile(null)
-      setFileChunks([])
-    } else {
-      setExpandedFile(internalName)
-      try {
-        const allChunks = await projectManager.getProjectChunks()
-        const chunksForFile = allChunks.filter(
-          chunk => chunk.metadata?.fileName === internalName
-        )
-        setFileChunks(chunksForFile)
-      } catch (err) {
-        console.error('Failed to load chunks:', err)
-        setError('Failed to load chunks: ' + err.message)
-        setExpandedFile(null)
-        setFileChunks([])
-      }
     }
   }
 
@@ -163,85 +140,31 @@ export default function KnowledgeBasePanel({ projectManager, projectName, onFile
           ) : (
             <div className="p-4 space-y-3">
               {files.map((file, idx) => (
-                <div key={idx} className="border border-slate-600 rounded-lg bg-slate-700 overflow-hidden">
-                  <div
-                    className="flex items-center justify-between p-4 hover:bg-slate-700/50 transition-colors"
-                  >
-                    <button
-                      onClick={() => handleToggleChunks(file.internalName)}
-                      className="flex-1 min-w-0 pr-4 text-left"
-                    >
-                      <div className="flex items-center gap-2">
-                        <svg
-                          className={`w-4 h-4 text-slate-400 transition-transform ${
-                            expandedFile === file.internalName ? 'transform rotate-90' : ''
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                        <p className="text-white font-medium truncate">{file.name}</p>
-                      </div>
-                      <div className="flex gap-4 mt-1 ml-6 text-xs text-slate-400">
-                        <span>{file.chunkCount} chunks</span>
-                        <span>Uploaded {file.uploadedAt}</span>
-                      </div>
-                    </button>
-                    <button
-                      onClick={() => handleDeleteFile(file.internalName, file.name)}
-                      disabled={deleting === file.internalName}
-                      className="ml-4 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                    >
-                      {deleting === file.internalName ? (
-                        <>
-                          <span className="inline-block w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></span>
-                          Deleting...
-                        </>
-                      ) : (
-                        'Delete'
-                      )}
-                    </button>
-                  </div>
-
-                  {expandedFile === file.internalName && (
-                    <div className="border-t border-slate-600 bg-slate-800/50">
-                      <div className="p-4 space-y-3 max-h-96 overflow-y-auto">
-                        {fileChunks.length === 0 ? (
-                          <p className="text-slate-400 text-sm text-center py-4">No chunks found</p>
-                        ) : (
-                          fileChunks.map((chunk, chunkIdx) => (
-                            <div
-                              key={chunkIdx}
-                              className="p-3 bg-slate-700/50 rounded border border-slate-600 text-sm"
-                            >
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-slate-400 font-mono text-xs">
-                                  Chunk {chunkIdx + 1} of {fileChunks.length}
-                                </span>
-                                {chunk.metadata?.pageStart && (
-                                  <span className="text-slate-400 text-xs">
-                                    {chunk.metadata.pageStart === chunk.metadata.pageEnd
-                                      ? `Page ${chunk.metadata.pageStart}`
-                                      : `Pages ${chunk.metadata.pageStart}-${chunk.metadata.pageEnd}`}
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">
-                                {chunk.text}
-                              </p>
-                              {chunk.metadata?.charStart !== undefined && (
-                                <div className="mt-2 pt-2 border-t border-slate-600 text-xs text-slate-500">
-                                  Characters: {chunk.metadata.charStart} - {chunk.metadata.charEnd}
-                                </div>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </div>
+                <div
+                  key={idx}
+                  className="flex items-center justify-between p-4 bg-slate-700 rounded-lg border border-slate-600 hover:border-slate-500 transition-colors"
+                >
+                  <div className="flex-1 min-w-0 pr-4">
+                    <p className="text-white font-medium truncate">{file.name}</p>
+                    <div className="flex gap-4 mt-1 text-xs text-slate-400">
+                      <span>{file.chunkCount} chunks</span>
+                      <span>Uploaded {file.uploadedAt}</span>
                     </div>
-                  )}
+                  </div>
+                  <button
+                    onClick={() => handleDeleteFile(file.internalName, file.name)}
+                    disabled={deleting === file.internalName}
+                    className="ml-4 px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/20 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                  >
+                    {deleting === file.internalName ? (
+                      <>
+                        <span className="inline-block w-3 h-3 border-2 border-red-400 border-t-transparent rounded-full animate-spin"></span>
+                        Deleting...
+                      </>
+                    ) : (
+                      'Delete'
+                    )}
+                  </button>
                 </div>
               ))}
             </div>

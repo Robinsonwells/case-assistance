@@ -116,16 +116,16 @@ class FileProcessingWorker {
 
     return lines
   }
- 
+
   normalizeHyphenation(text) {
     return text.replace(/(\w+)-\s*\n\s*(\w+)/g, '$1$2')
   }
 
   chunkByTokens(text, options, onProgress) {
-    const targetTokens = 350
-    const maxTokens = 500
-    const minTokens = 250
-    const overlapTokens = 50
+    const targetTokens = 1000
+    const maxTokens = 1200
+    const minTokens = 600
+    const overlapTokens = 300
 
     const estimatedCharsPerToken = 4
     const targetChars = targetTokens * estimatedCharsPerToken
