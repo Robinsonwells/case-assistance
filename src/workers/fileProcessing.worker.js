@@ -122,10 +122,10 @@ class FileProcessingWorker {
   }
 
   chunkByTokens(text, options, onProgress) {
-    const targetTokens = 1000
-    const maxTokens = 1200
-    const minTokens = 600
-    const overlapTokens = 300
+    const targetTokens = 350
+    const maxTokens = 500
+    const minTokens = 250
+    const overlapTokens = 50
 
     const estimatedCharsPerToken = 4
     const targetChars = targetTokens * estimatedCharsPerToken
