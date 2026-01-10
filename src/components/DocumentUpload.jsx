@@ -83,16 +83,16 @@ export default function DocumentUpload({ projectManager, onUploadComplete }) {
         setDeviceInfo(info)
       }
 
-      // Reset after a short delay
-      setTimeout(() => {
-        setProgress(0)
-        setStage('')
-        setStageLabel('')
-        setUploading(false)
-        if (onUploadComplete) {
-          onUploadComplete()
-        }
-      }, 500)
+      // Reset immediately to prevent scroll lock
+      setProgress(0)
+      setStage('')
+      setStageLabel('')
+      setUploading(false)
+
+      // Call completion callback
+      if (onUploadComplete) {
+        onUploadComplete()
+      }
     } catch (err) {
       console.error('Upload error:', err)
       setError(err.message || 'Failed to upload document. Please try again.')
