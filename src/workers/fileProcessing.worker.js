@@ -116,7 +116,7 @@ class FileProcessingWorker {
 
     return lines
   }
-
+ 
   normalizeHyphenation(text) {
     return text.replace(/(\w+)-\s*\n\s*(\w+)/g, '$1$2')
   }
